@@ -1,0 +1,16 @@
+# Agentic 3-file standard (never committed)
+CLAUDE.md
+MEMORY.md
+ANTIPATTERNS.md
+
+# LaTeX build artifacts
+*.aux
+*.log
+*.out
+*.synctex.gz
+*.fls
+*.fdb_latexmk
+*.toc
+
+# macOS / editor cruft
+.DS_Store
