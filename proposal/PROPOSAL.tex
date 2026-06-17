@@ -9,7 +9,7 @@
 
 \title{\vspace{-2.5em}Recovery-Selection: Learning \emph{Which} Recovery a Robot Policy Should Run}
 \author{Vignan Kamarthi\\ \small RIVeR Lab, Northeastern University}
-\date{\small For: Prof.\ Taskin Padir and Lorena Genua \quad|\quad Co-Op term Jul--Dec 2026 \quad|\quad Draft \today}
+\date{Project Proposal}
 
 \begin{document}
 \maketitle
@@ -18,30 +18,31 @@
 \noindent\textbf{Thesis.} When a learned manipulation policy fails, the best way to recover depends on \emph{what kind} of failure occurred, yet every current system hard-codes a single recovery behavior. I propose to make recovery-strategy \emph{selection} a learnable, cost-aware decision problem, and to show that a small learned selector chooses recoveries that beat any fixed single-mechanism baseline at matched intervention budget.
 
 \section{The gap}
-Recovery from execution failures in robot learning is splintered into siloed lines that each commit to \emph{one} mechanism: retry/rewind (RaC, SPR), local-RL recovery (RecoveryChaining), VLM re-planning (FailSafe, SC-VLA), and human-in-the-loop hand-off (the Cornell HITL framework, HRI 2026). Each works only in the regime it assumes (a rewind needs an in-distribution target; local RL needs a reachable funnel; VLM re-planning fails on perception-OOD states). No published work (verified over four substance-phrased literature probes during a structured search) does all of: (a) formally defines a policy's \emph{competence region} and types failures by their relation to it; (b) learns a meta-policy that selects among three or more heterogeneous recovery mechanisms under explicit cost and risk constraints; and (c) evaluates on real-robot rollouts with monolithic end-to-end VLA policies. The nearest neighbor (Cornell HITL) arbitrates only act-versus-ask and only for modular perception/planning/control pipelines, not monolithic VLAs.
+Recovery from execution failures in robot learning is splintered into siloed lines that each commit to \emph{one} mechanism: retry/rewind (RaC, SPR), local-RL recovery (RecoveryChaining), VLM re-planning (FailSafe, SC-VLA), and human-in-the-loop hand-off (the Cornell HITL framework, HRI 2026). Each works only in the regime it assumes (a rewind needs an in-distribution target; local RL needs a reachable funnel; VLM re-planning fails on perception-OOD states). No published work (verified over four substance-phrased literature probes during a structured search) does all of: (a) formally defines a policy's \emph{competence region} and types failures by their relation to it; (b) learns which of three or more different recovery mechanisms to use, under explicit cost and risk constraints; and (c) evaluates on real-robot rollouts with monolithic end-to-end VLA policies. The nearest neighbor (Cornell HITL) arbitrates only act-versus-ask and only for modular perception/planning/control pipelines, not monolithic VLAs.
 
 \section{Contribution}
-Three firsts, each independently checkable:
+The contribution has three parts:
 \begin{enumerate}
-\item \textbf{A competence-grounded failure taxonomy.} Failure type is defined by the state's relation to the frozen policy's competence region (a calibrated combination of latent-state density and action-head ensemble disagreement, with a control-invariant safe set as the hard anchor), not by semantic error labels. The type implies the action: in-region $\to$ retry; near-boundary $\to$ rewind/back-off; out-of-region-plannable $\to$ re-plan; out-of-region-risky $\to$ ask-human.
-\item \textbf{A learned meta-policy over heterogeneous recoveries.} A cost-sensitive selector maps (failure features, competence signals, task context) to one of five recovery arms, with a Lagrangian budget on the ask-human arm, unifying four currently siloed literatures.
-\item \textbf{Counterfactual recovery evaluation.} For each injected failure we reset and replay the \emph{entire} five-arm strategy grid to obtain per-arm cost (time, human-intervention effort, safety violations). This yields a per-failure oracle and a new metric, \emph{recovery-regret} (realized cost minus per-failure oracle cost), replacing binary recovery-success.
+\item \textbf{A failure taxonomy grounded in competence, not error labels.} Each failure is typed by how far the current state lies outside the region where the frozen policy is reliable, rather than by a description of what went wrong. That region is read from two signals: how familiar the state is in the policy's learned representation (latent-state density), and how much a small ensemble of the policy disagrees on the next action, with a control-invariant safe set as a hard safety floor. The state's position then fixes the recovery: in-region $\to$ retry; near the boundary $\to$ rewind/back-off; outside but plannable $\to$ re-plan; outside and risky $\to$ ask a human.
+\item \textbf{A learned selector over the recovery moves.} Given a failure, its features, the competence signals, and the task context, the selector picks one of the five recovery moves, under an explicit budget on how often it may ask a human. This unifies four lines of work that each hard-code a single move.
+\item \textbf{Counterfactual recovery evaluation.} For each injected failure we reset and replay all five recovery moves and record each one's cost (time, human-intervention effort, safety violations). This yields, per failure, the best possible move (the oracle) and a new metric, \emph{recovery-regret} (the cost paid minus the oracle's cost), which replaces binary recovery-success.
 \end{enumerate}
 
-\section{Method and plan (simulation first, then UR3e)}
-\begin{itemize}
-\item \textbf{Weeks 1--4 (sim, no robot) -- the make-or-break gate.} Build the competence model on a frozen VLA (pi0-FAST or OpenVLA, inference/LoRA only). Inject 100--150 scripted failures across 3--4 tabletop tasks; replay the full five-arm grid per failure. \textbf{GO} if the per-failure oracle beats the best fixed strategy by $\geq 15\%$ recovery-regret and a linear probe separates failure classes above $\sim$70\%. \textbf{NO-GO} still yields a publishable benchmark plus metric.
-\item \textbf{Weeks 4--10.} Train and conformally calibrate the selector (offline contextual bandit, doubly-robust over the grid). Target $\sim$400--600 labeled failure instances.
-\item \textbf{Weeks 10--16 (UR3e, with Lorena).} Validate recovery-regret against the four fixed-mechanism incumbents plus random and a hand-coded threshold rule; held-out task generalization; ask-rate/workload curves; ablations on each competence signal.
-\end{itemize}
+\section{Method and plan}
+A linear, simulation-first workflow:
+\begin{enumerate}
+\item \textbf{Make-or-break gate (sim, no robot).} Build the competence model on a frozen VLA (pi0-FAST or OpenVLA, inference/LoRA only). Inject 100--150 scripted failures across 3--4 tabletop tasks; replay all five recovery moves on each failure. \textbf{GO} if the per-failure oracle beats the best fixed strategy by $\geq 15\%$ recovery-regret and a linear probe separates failure classes above $\sim$70\%. \textbf{NO-GO} still yields a publishable benchmark plus metric.
+\item \textbf{Selector training (sim).} Train the selector on the recorded grid (it learns which move to pick per failure from the measured costs) and calibrate its confidence. Target $\sim$400--600 labeled failure instances.
+\item \textbf{Real-robot validation (UR3e).} Validate recovery-regret against the four fixed-mechanism incumbents plus random and a hand-coded threshold rule; held-out task generalization; ask-rate/workload curves; ablations on each competence signal.
+\end{enumerate}
 
 \section{Feasibility and resources}
-No policy training; only a small selector head and competence calibration. Fits Tier-1 compute (1x H200). The simulation pilot doubles as the training dataset, capping downside at four weeks. The one robot-coupled stage (Weeks 10--16) needs scripted-failure UR3e time with repeatable resets, coordinated through Lorena per lab protocol.
+No policy training; only a small selector head and competence calibration, which fit on a single strong GPU such as an H200. The simulation pilot doubles as the training dataset, so the make-or-break gate carries minimal downside before any robot commitment. The one robot-coupled stage needs scripted-failure UR3e time with repeatable resets.
 
-\section{Venue, alignment, and the ask}
-\textbf{Venue.} CoRL 2027 (primary), with an ICRA-workshop on-ramp; the dataset and recovery-regret metric are defensible contributions even if a selector appears elsewhere first. \textbf{Alignment.} The ask-human arm's intervention-budget objective is a direct line into Lorena's HRI / intervention-cost program, and the work reads foundational to ML committees while reading robotics to robotics committees, supporting the Fall-2027 PhD application. \textbf{The ask:} (1) access to the UR3e with repeatable resets for the Weeks 10--16 validation; (2) Lorena's guidance on the human-intervention cost model (emulated for the main paper to avoid IRB timeline risk); (3) Prof.\ Padir's feedback on scope and venue framing.
+\section{Venue}
+Primary target CoRL 2027 (the robotics home venue), with an ICRA workshop as an on-ramp and arXiv at submission; the work cross-lists naturally to NeurIPS / ICLR. The dataset and the recovery-regret metric stand as defensible contributions even if a learned selector appears elsewhere first.
 
 \vspace{0.6em}
-\noindent\footnotesize\textbf{Key related work (citations to finalize):} Back-to-the-Manifold (competence/state-density); TAIL-Safe (control-invariant safe set); RaC, SPR (retry/rewind); RecoveryChaining (local-RL recovery); FailSafe, SC-VLA (VLM re-planning); Banerjee et al., Cornell HITL (HRI 2026); TCoT (AAAI 2026); SO-101 (recovery-aware evaluation).
+\noindent\footnotesize\textbf{Key related work (citations to finalize):} Back-to-the-Manifold (Reichlin et al., IROS 2022, state-density recovery); control-invariant safe set (Bo et al. 2023); RaC, SPR (retry/rewind); RecoveryChaining (local-RL recovery); FailSafe, SC-VLA (self-correcting VLA, 2024) (VLM re-planning); Banerjee et al., Cornell HITL (HRI 2026); TCoT (AAAI 2026); SO-101 recovery benchmark (recovery-aware evaluation).
 
 \end{document}
