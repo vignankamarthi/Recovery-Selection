@@ -1,7 +1,23 @@
-# Agentic 3-file standard (never committed)
+# Agentic 3-file standard + internal working docs (never committed)
 CLAUDE.md
 MEMORY.md
 ANTIPATTERNS.md
+PLAN.md
+HARVEST-DESIGN-REVIEW.md
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+
+# Data / experiment artifacts (large, not source)
+experiments/*/
+*.bag
+*.db3
+*.mcap
 
 # LaTeX build artifacts
 *.aux

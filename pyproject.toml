@@ -1,0 +1,13 @@
+[project]
+name = "harvest-recovery"
+version = "0.0.0"
+description = "HARVEST data-collection framework + recovery-selection layer (RIVeR Lab)"
+requires-python = ">=3.10"
+
+# src-layout: packages `schema`, `harvest`, `recovery` live under src/.
+# `pythonpath = src` makes them importable as top-level packages in tests,
+# so imports are absolute (`from schema...`) and the fence stays grep-checkable.
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = "-q"
