@@ -28,5 +28,8 @@ experiments/*/
 *.fdb_latexmk
 *.toc
 
+# MuJoCo runtime log (regenerated on every sim run)
+MUJOCO_LOG.TXT
+
 # macOS / editor cruft
 .DS_Store
