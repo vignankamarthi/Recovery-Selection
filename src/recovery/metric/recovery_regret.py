@@ -1,7 +1,7 @@
 """Recovery-regret metric (Part 2, our contribution).
 
 Replaces binary recovery-success. For each injected failure, the counterfactual grid
-replays all five recovery arms and records each arm's cost; the per-failure oracle is
+replays all four recovery arms and records each arm's cost. The per-failure oracle is
 the min-cost arm. recovery-regret = realized cost - oracle cost.
 
 FENCE: this module imports `schema` only, never `harvest` internals. Build only after

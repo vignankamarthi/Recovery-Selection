@@ -9,7 +9,7 @@ The state's position implies the recovery arm (in-region -> retry; boundary -> r
 outside-but-plannable -> replan; outside-and-risky -> ask-human).
 
 FENCE: imports `schema` only, never `harvest`. Build only after Part 1 (ANTIPATTERN 1).
-The base policy (pi0-FAST vs OpenVLA, inference/LoRA only) is an open decision. Stub.
+The base policy (ACT vs pi0-FAST vs OpenVLA, inference/LoRA only) is an open decision (GATE 3). Stub.
 """
 
 from __future__ import annotations
