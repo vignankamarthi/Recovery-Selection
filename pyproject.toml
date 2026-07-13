@@ -11,3 +11,6 @@ requires-python = ">=3.10"
 pythonpath = ["src"]
 testpaths = ["tests"]
 addopts = "-q"
+markers = [
+    "slow: physics-sim tests that run many episodes (deselect with -m 'not slow')",
+]
