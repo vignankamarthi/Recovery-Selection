@@ -4,6 +4,7 @@ MEMORY.md
 ANTIPATTERNS.md
 PLAN.md
 HARVEST-DESIGN-REVIEW.md
+VENUE-TIMELINE.md
 
 # Python
 __pycache__/
@@ -33,3 +34,16 @@ MUJOCO_LOG.TXT
 
 # macOS / editor cruft
 .DS_Store
+
+# Sim visualization scratch tools (always-on viewer/filmstrip, never committed)
+sim_viewer.py
+sim_viz.py
+sim_renders/
+
+watch_sim.sh
+sim_present.py
+
+# Generated sim datasets (regenerable from generate_dataset; not committed)
+data/
+scripts_gen_dataset.py
+gen_dataset_parallel.py
