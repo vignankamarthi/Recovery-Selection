@@ -1,67 +1,67 @@
-"""Sim episode generation (Phase 1.6d).
+"""Sim episode runner (Part 1).
 
-Runs a scripted approach -> grasp -> lift on the physical Gen3 + gripper scene and
-records the multimodal streams into a `RecordedEpisode`. The grasp-stability label comes
-from SIMULATOR ground truth (F7), never the tactile stream. Also exposes `SimSource`, a
-`SensorSource` reading one modality from a shared world, for interface parity with the
-mock and (later) real driver.
+Runs one lying-can pick-and-reorient demonstration (`sim.reorient.demonstrate`) on a `SimWorld`
+backend while recording the multimodal streams into a `RecordedEpisode`. The demonstration is a
+3-stage graded pipeline with three labels: `upright_success` (the reorient brought the label up
+to face the overhead camera, right-side-up, in one move with no stand-upright detour) and
+`label_visible` (the overhead camera reads enough label coverage) are REAL sim signals;
+`grasp_stable` is a SIMULATOR default (a real tactile/physics signal on hardware, flagged by the
+dataset card).
+Also exposes `SimSource`, a `SensorSource` reading one modality from a shared, externally-stepped
+world, for interface parity with the mock and (later) the real driver.
 """
 
 from __future__ import annotations
 
+import math
 from dataclasses import replace
 from typing import Iterator, Sequence
 
-import mujoco
-import numpy as np
-
-from harvest.sim.scene import CAN_HALF_HEIGHT, can_seed_from_id
+from harvest.sim.reorient import demonstrate, slip_severity
+from harvest.sim.scene import can_seed_from_id
 from harvest.sim.world import SimWorld
 from schema.episode import Episode, Label, LabelProvenance, Outcome, RecordedEpisode
 from schema.streams import Modality, Sample
 
+# The canonical seven-stream suite (the F4 review split depth into two justified viewpoints). Depth
+# is rendered only when streams are materialized (on the cluster); the local metadata run records
+# just proprioception, so this cost is not paid on the Mac.
 DEFAULT_MODALITIES: tuple[Modality, ...] = (
     Modality.PROPRIOCEPTION,
     Modality.FORCE_TORQUE,
     Modality.TACTILE,
     Modality.RGB_OVERHEAD,
     Modality.RGB_WRIST,
+    Modality.DEPTH_OVERHEAD,
+    Modality.DEPTH_WRIST,
 )
 
-
-def _ik_move(world: SimWorld, target, max_steps=150, tol=0.008, damping=0.1, gain=0.6, on_step=None) -> None:
-    """Damped-least-squares IK: drive the gripper_pinch site to `target` by stepping."""
-    model, data = world.model, world.data
-    jacp = np.zeros((3, model.nv))
-    jacr = np.zeros((3, model.nv))
-    target = np.asarray(target, dtype=float)
-    for _ in range(max_steps):
-        err = target - data.site_xpos[world._pinch_sid]
-        if np.linalg.norm(err) < tol:
-            break
-        mujoco.mj_jacSite(model, data, jacp, jacr, world._pinch_sid)
-        j = jacp[:, :7]
-        dq = j.T @ np.linalg.solve(j @ j.T + damping**2 * np.eye(3), err)
-        world.set_arm(data.qpos[:7] + gain * dq)
-        world.step(5)
-        if on_step is not None:
-            on_step()
+# All cans spawn LYING (the task is to right them). This 90-degree tip lays the cylinder on its
+# side; it settles under gravity to an unknown resting yaw, so the grasp is orientation-aware.
+LYING_QUAT = (math.cos(math.pi / 4), math.sin(math.pi / 4), 0.0, 0.0)
 
 
-def sim_episode(
+def record_episode(
     episode: Episode,
-    can_pos: tuple[float, float, float] = (0.5, 0.0, CAN_HALF_HEIGHT),
+    can_pos: tuple[float, float, float] = (0.5, 0.0, 0.11),
     modalities: Sequence[Modality] = DEFAULT_MODALITIES,
     record_every: int = 15,
+    can_quat: tuple[float, float, float, float] = LYING_QUAT,
 ) -> RecordedEpisode:
-    """Run one scripted grasp episode and return a RecordedEpisode with a sim label.
+    """Run one lying-can pick-and-reorient episode and return a RecordedEpisode.
 
-    The can's physical variant is `episode.condition`, and its per-can geometry is seeded
-    from `episode.can_id`, so every can_id is a fixed, distinct physical unit (F5/F6)."""
+    The can's physical variant is `episode.condition`, its per-can geometry is seeded from
+    `episode.can_id` (so every can_id is a fixed distinct physical unit, F5/F6), and `can_quat`
+    is its placement orientation (default LYING; the can settles under gravity to an unknown
+    resting yaw). Streams are recorded through the smooth demonstration glide only, never through
+    the hidden reachability search.
+    """
+    seed = can_seed_from_id(episode.can_id)
     world = SimWorld(
         can_pos,
         condition=episode.condition,
-        can_seed=can_seed_from_id(episode.can_id),
+        can_seed=seed,
+        can_quat=can_quat,
     )
     streams: dict[str, list[Sample]] = {m.value: [] for m in modalities}
     n = [0]
@@ -73,26 +73,25 @@ def sim_episode(
             for m in modalities:
                 streams[m.value].append(world.sample(m, ts))
 
-    can = np.asarray(can_pos, dtype=float)
-    world.set_gripper(0.0)                                   # open
-    _ik_move(world, can + [0, 0, 0.12], on_step=tick)       # approach above
-    _ik_move(world, can + [0, 0, 0.02], on_step=tick)       # descend to grasp height
-    world.set_gripper(1.0)                                   # close
-    for _ in range(40):
-        world.step(5)
-        tick()                                              # settle the grasp
-    _ik_move(world, can + [0, 0, 0.18], on_step=tick)       # lift
-    for _ in range(20):
-        world.step(5)
-        tick()                                              # settle at top
+    # The reorient is robust; failures come from a condition-correlated in-hand SLIP (damaged cans
+    # slip, the label rolls off, the read fails), which is where tactile helps on real hardware.
+    res = demonstrate(world, on_step=tick, slip=slip_severity(episode.condition, seed))
 
-    success = world.grasp_success()
+    # Three graded stage labels. `upright_success` and `label_visible` are real sim signals;
+    # `grasp_stable` is a SIMULATOR default here (the weld carries the can, so the welded grasp
+    # is not an honest hold signal), a real tactile/physics signal only on hardware. F7: no label
+    # is tactile-derived. The task outcome requires all three stages to pass.
+    grasp_stable = True
     labels = list(episode.labels) + [
-        Label("grasp_stable", success, LabelProvenance.SIMULATOR),
+        Label("upright_success", bool(res.upright_success), LabelProvenance.SIMULATOR),
+        Label("grasp_stable", grasp_stable, LabelProvenance.SIMULATOR),
+        Label("label_visible", bool(res.label_visible), LabelProvenance.AUTO_VISION),
+        Label("label_up_cos", float(res.label_nz), LabelProvenance.AUTO_VISION),
     ]
+    passed = bool(res.upright_success and grasp_stable and res.label_visible)
     stamped = replace(
         episode,
-        outcome=Outcome.SUCCESS if success else Outcome.FAILURE,
+        outcome=Outcome.SUCCESS if passed else Outcome.FAILURE,
         stream_keys=tuple(streams.keys()),
         labels=labels,
     )
