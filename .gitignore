@@ -43,7 +43,7 @@ sim_renders/
 watch_sim.sh
 sim_present.py
 
-# Generated sim datasets (regenerable from generate_dataset; not committed)
+# Generated sim datasets (regenerable; the data itself is not committed)
 data/
 scripts_gen_dataset.py
-gen_dataset_parallel.py
+# NOTE: gen_dataset_parallel.py is NOT ignored -- the cluster materialization needs it (committed).
