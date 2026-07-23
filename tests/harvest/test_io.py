@@ -88,3 +88,22 @@ def test_lerobot_export_round_trips_metadata_and_arrays(tmp_path):
         np.asarray(got.streams["tactile"][0].data),
         np.asarray(rec.streams["tactile"][0].data),
     )
+
+
+def test_per_episode_write_plus_index_matches_batch_export(tmp_path):
+    # Parallel/resumable generation writes each episode's streams on its own, then assembles the
+    # index. The result must round-trip identically to a batch export_dataset (same fence seam,
+    # so a sharded cluster run and a local batch run produce the same dataset).
+    from harvest.io.lerobot_adapter import write_episode_streams, write_index
+
+    rec = _make_recorded()
+    out = tmp_path / "sharded"
+    manifest = write_episode_streams(rec, out)          # writes data/<eid>.npz, returns its manifest
+    assert (out / "data" / f"{rec.episode.episode_id}.npz").exists()
+    write_index([manifest], out)                         # assembles episodes.jsonl from manifests
+    loaded = load_export(out)
+    assert len(loaded) == 1 and loaded[0].episode.can_id == "can-042"
+    np.testing.assert_array_equal(
+        np.asarray(loaded[0].streams["rgb_overhead"][0].data),
+        np.asarray(rec.streams["rgb_overhead"][0].data),
+    )
