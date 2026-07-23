@@ -19,7 +19,7 @@ if platform.system() == "Darwin":
 import mujoco
 import numpy as np
 
-from harvest.sim.scene import CAN_HALF_HEIGHT, build_scene
+from harvest.sim.scene import CAN_HALF_HEIGHT, CAN_RADIUS, build_scene, can_label_yaw
 from schema.episode import ConditionClass
 from schema.streams import Modality, Sample
 
@@ -29,6 +29,16 @@ HOME_QPOS = np.array(
 )
 # The can must rise this far above its rest height to count as lifted/grasped.
 LIFT_THRESHOLD_M = 0.10
+# Overhead label pixels a well-presented label shows at the narrow-FOV inspection framing,
+# the normalizer for the visibility score (measured: a fully-turned-up label covers ~220 px).
+_OVERHEAD_LABEL_REF_PX = 220.0
+
+# ONE process-global render context, closed when the model or size changes. A `mujoco.Renderer`
+# holds a GL framebuffer + context; a new SimWorld per episode meant a new renderer per episode,
+# and Python GC does not free the GL context, so it leaked one per episode and exhausted memory on
+# a long generation run. Keyed on model identity so each episode reuses (then replaces) the single
+# live renderer. (Same fix pattern as `_overhead_px` in `sim/reorient.py`.)
+_RENDER: dict = {"model": None, "hw": None, "r": None}
 
 
 class SimWorld:
@@ -39,11 +49,15 @@ class SimWorld:
         can_pos: tuple[float, float, float] = (0.5, 0.0, CAN_HALF_HEIGHT),
         condition: ConditionClass = ConditionClass.NOMINAL,
         can_seed: int = 0,
+        can_quat: tuple[float, float, float, float] = (1.0, 0.0, 0.0, 0.0),
+        settle_steps: int = 250,
     ):
-        self.model = build_scene(can_pos, condition, can_seed)
+        self.model = build_scene(can_pos, condition, can_seed, can_quat)
         self.data = mujoco.MjData(self.model)
+        self._settle_steps = int(settle_steps)
+        self._label_yaw = can_label_yaw(can_seed)
         self._can_bid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "can")
-        self._can_rest_z = can_pos[2]
+        self._can_rest_z = can_pos[2]  # provisional; the settled value is captured in reset()
         self._wrist_bid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "bracelet_link")
         self._pinch_sid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_SITE, "gripper_pinch")
 
@@ -52,11 +66,10 @@ class SimWorld:
 
         self._left_pad_geoms = {_gid("gripper_left_pad1"), _gid("gripper_left_pad2")}
         self._right_pad_geoms = {_gid("gripper_right_pad1"), _gid("gripper_right_pad2")}
+        self._label_gid = _gid("can_label")
         # Full-physics state spec for deterministic snapshot/restore (validity fix C2).
         self._state_spec = int(mujoco.mjtState.mjSTATE_INTEGRATION)
         self._state_size = mujoco.mj_stateSize(self.model, self._state_spec)
-        self._renderer: mujoco.Renderer | None = None
-        self._renderer_hw: tuple[int, int] | None = None
         self.reset()
 
     def reset(self) -> None:
@@ -64,6 +77,13 @@ class SimWorld:
         self.data.qpos[:7] = HOME_QPOS
         self.data.ctrl[:7] = HOME_QPOS
         mujoco.mj_forward(self.model, self.data)
+        # Let the can settle under gravity from its (possibly non-upright) spawn pose to a
+        # stable rest, the proposal's unknown orientation. The arm sits clear at HOME. The
+        # settled height becomes the lift-baseline, so a lying can (lower centroid) is scored
+        # against its own rest, not the spawn height.
+        for _ in range(self._settle_steps):
+            mujoco.mj_step(self.model, self.data)
+        self._can_rest_z = float(self.data.xpos[self._can_bid][2])
 
     def step(self, n: int = 1) -> None:
         for _ in range(int(n)):
@@ -93,12 +113,130 @@ class SimWorld:
         """0.0 = fully open, 1.0 = fully closed (maps to the 0-255 tendon actuator)."""
         self.data.ctrl[7] = float(np.clip(closed_frac, 0.0, 1.0)) * 255.0
 
+    def pinch_position(self) -> np.ndarray:
+        """World position of the gripper pinch site (the grasp point)."""
+        return self.data.site_xpos[self._pinch_sid].copy()
+
+    def aligned_wrist(self, target_angle: float) -> float:
+        """Wrap a target wrist-roll angle into joint 7's range (fingers are pi-symmetric)."""
+        lo, hi = self.model.jnt_range[6]
+        if not bool(self.model.jnt_limited[6]):
+            return float(target_angle)
+        a = float(target_angle)
+        while a > hi:
+            a -= np.pi
+        while a < lo:
+            a += np.pi
+        return float(np.clip(a, lo, hi))
+
+    def move_pinch_to(self, target, wrist=None, max_steps: int = 150, tol: float = 0.008,
+                      damping: float = 0.1, gain: float = 0.6, on_step=None) -> None:
+        """Damped-least-squares IK driving the gripper_pinch site to `target` by stepping.
+
+        With `wrist=None` all 7 joints solve for position. With a `wrist` angle, joint 7
+        (wrist roll) is held to aim the finger-closing axis while joints 1-6 solve for
+        position, so the fingers aim without moving the grasp point. The IK lives here in the
+        backend, so a manipulation policy stays MuJoCo-free and drives any backend that
+        provides this method.
+        """
+        jacp = np.zeros((3, self.model.nv))
+        jacr = np.zeros((3, self.model.nv))
+        target = np.asarray(target, dtype=float)
+        ndof = 6 if wrist is not None else 7
+        for _ in range(int(max_steps)):
+            if wrist is not None:
+                self.data.ctrl[6] = wrist
+            err = target - self.data.site_xpos[self._pinch_sid]
+            if np.linalg.norm(err) < tol:
+                break
+            mujoco.mj_jacSite(self.model, self.data, jacp, jacr, self._pinch_sid)
+            j = jacp[:, :ndof]
+            dq = j.T @ np.linalg.solve(j @ j.T + damping**2 * np.eye(3), err)
+            q = self.data.qpos[:7].copy()
+            q[:ndof] += gain * dq
+            if wrist is not None:
+                q[6] = wrist
+            self.set_arm(q)
+            self.step(5)
+            if on_step is not None:
+                on_step()
+
+    def pinch_rotation(self) -> np.ndarray:
+        """World rotation matrix (3x3) of the gripper pinch frame."""
+        return self.data.site_xmat[self._pinch_sid].reshape(3, 3).copy()
+
+    def move_pinch_pose(self, target_pos, target_rot, max_steps: int = 140, damping: float = 0.15,
+                        pos_gain: float = 0.5, rot_gain: float = 0.15, on_step=None) -> None:
+        """6-DOF damped-least-squares IK driving the pinch site to a target position AND
+        orientation. Used to reorient a grasped can to present its label. Kept gentle (low
+        rotation gain) so the grasp is not shocked loose. Lives in the backend so the policy
+        stays MuJoCo-free."""
+        jacp = np.zeros((3, self.model.nv))
+        jacr = np.zeros((3, self.model.nv))
+        tpos = np.asarray(target_pos, dtype=float)
+        rt = np.asarray(target_rot, dtype=float)
+        for _ in range(int(max_steps)):
+            pe = tpos - self.data.site_xpos[self._pinch_sid]
+            rc = self.data.site_xmat[self._pinch_sid].reshape(3, 3)
+            re = 0.5 * (np.cross(rc[:, 0], rt[:, 0]) + np.cross(rc[:, 1], rt[:, 1])
+                        + np.cross(rc[:, 2], rt[:, 2]))
+            mujoco.mj_jacSite(self.model, self.data, jacp, jacr, self._pinch_sid)
+            jac = np.vstack([jacp[:, :7], jacr[:, :7]])
+            e = np.concatenate([pos_gain * pe, rot_gain * re])
+            dq = jac.T @ np.linalg.solve(jac @ jac.T + damping**2 * np.eye(6), e)
+            self.set_arm(self.data.qpos[:7] + dq)
+            self.step(5)
+            if on_step is not None:
+                on_step()
+
+    def overhead_label_visibility(self, height: int = 200, width: int = 200) -> float:
+        """Label-visibility ground truth in [0, 1] from the overhead camera.
+
+        The exposed nutrition-label coverage (segmentation, a vision read, never tactile).
+        0 means the label is not exposed to the camera, 1 a well-presented label. This is the
+        overhead-RGB label-visibility signal the pick-and-reorient task is scored on (F7, the
+        vision channel is independent of the grasp-stability label)."""
+        ren = mujoco.Renderer(self.model, height, width)
+        ren.update_scene(self.data, camera="overhead")
+        ren.enable_segmentation_rendering()
+        seg = ren.render()
+        ren.disable_segmentation_rendering()
+        label_px = int((seg[..., 0] == self._label_gid).sum())
+        return min(1.0, label_px / _OVERHEAD_LABEL_REF_PX)
+
     # --- reads (ground truth) ---
     def proprioception(self) -> np.ndarray:
         return self.data.qpos[:7].copy()
 
     def can_position(self) -> np.ndarray:
         return self.data.xpos[self._can_bid].copy()
+
+    def can_orientation(self) -> np.ndarray:
+        """Can body rotation matrix (3x3) in the world frame."""
+        return self.data.xmat[self._can_bid].reshape(3, 3).copy()
+
+    def can_long_axis(self) -> np.ndarray:
+        """The can's cylinder axis (its local z) in the world frame."""
+        return self.can_orientation()[:, 2].copy()
+
+    def can_is_upright(self, tol_deg: float = 35.0) -> bool:
+        """True if the cylinder axis is within tol of vertical (settled standing, not lying)."""
+        tilt = np.degrees(np.arccos(np.clip(abs(float(self.can_long_axis()[2])), 0.0, 1.0)))
+        return bool(tilt <= tol_deg)
+
+    def can_label_pose(self) -> tuple[np.ndarray, np.ndarray]:
+        """World position and outward normal of the nutrition-label patch on the can wall.
+
+        The reorient (1.7c) turns this normal toward the overhead camera, and overhead depth
+        verifies the exposure. The patch sits at radius `CAN_RADIUS` and angle `_label_yaw`
+        in the body frame, its +x face the outward normal.
+        """
+        rot = self.can_orientation()
+        local = np.array(
+            [CAN_RADIUS * np.cos(self._label_yaw), CAN_RADIUS * np.sin(self._label_yaw), 0.0]
+        )
+        normal_local = np.array([np.cos(self._label_yaw), np.sin(self._label_yaw), 0.0])
+        return (self.can_position() + rot @ local, rot @ normal_local)
 
     def grasp_success(self) -> bool:
         """Sim ground truth: has the can been lifted past the threshold?"""
@@ -162,10 +300,12 @@ class SimWorld:
         return Sample(modality=modality, timestamp_ns=timestamp_ns, data=readers[modality](), notes="sim")
 
     def render(self, camera: str = "overhead", depth: bool = False, height: int = 96, width: int = 96) -> np.ndarray:
-        if self._renderer is None or self._renderer_hw != (height, width):
-            self._renderer = mujoco.Renderer(self.model, height, width)
-            self._renderer_hw = (height, width)
-        r = self._renderer
+        if _RENDER["model"] is not self.model or _RENDER["hw"] != (height, width):
+            if _RENDER["r"] is not None:
+                _RENDER["r"].close()                 # free the previous GL context before replacing
+            _RENDER["r"] = mujoco.Renderer(self.model, height, width)
+            _RENDER["model"], _RENDER["hw"] = self.model, (height, width)
+        r = _RENDER["r"]
         r.update_scene(self.data, camera=camera)
         if depth:
             r.enable_depth_rendering()
