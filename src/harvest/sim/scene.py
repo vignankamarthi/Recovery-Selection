@@ -32,6 +32,12 @@ CAN_RADIUS = 0.033
 CAN_HALF_HEIGHT = 0.05
 _METAL = [0.80, 0.25, 0.20, 1.0]
 _RUST = [0.42, 0.26, 0.12, 1.0]
+_LABEL = [0.95, 0.95, 0.98, 1.0]  # bright nutrition-label patch
+
+# Overhead RGB-D camera, ceiling-mounted. High standoff + narrow FOV so a small gripper does
+# not occlude the label the robot presents beneath it (matches a real ceiling Kinect).
+OVERHEAD_CAM_HEIGHT = 1.7
+OVERHEAD_CAM_FOVY = 26.0  # frames the inspection region where the robot presents the flat label
 
 # The organic-failure lever (C3). Under the firm 2F-85 pinch, friction and width barely
 # affect grasp success; the reliable, physically-grounded failure driver is displacing the
@@ -57,12 +63,31 @@ def can_seed_from_id(can_id: str) -> int:
     return int(hashlib.sha256(can_id.encode()).hexdigest()[:8], 16)
 
 
-def _add_can(world: mujoco.MjSpec, condition: ConditionClass, rng: np.random.Generator, pos) -> None:
+def can_label_yaw(can_seed: int) -> float:
+    """The angle (radians) of the nutrition-label patch around the can wall.
+
+    Fixed per physical can (seeded by `can_id`), on a stream independent of the geometry
+    randomization so it stays stable. The label's location on the can is a property of the
+    can, while the can's placement orientation varies per episode.
+    """
+    return float(np.random.default_rng(can_seed + 999983).uniform(0.0, 2.0 * np.pi))
+
+
+def _add_can(
+    world: mujoco.MjSpec,
+    condition: ConditionClass,
+    rng: np.random.Generator,
+    pos,
+    quat,
+    label_yaw: float,
+) -> None:
     """Add a condition-specific, per-can-randomized can body to the world.
 
     The distinctive shape (ellipsoid / crimped rim / bulge / rust colour) gives each class a
     look a depth/vision sensor can separate; the per-can lateral offset gives it the
-    condition-correlated organic grasp-failure rate.
+    condition-correlated organic grasp-failure rate. `quat` is the per-episode placement
+    orientation (the can settles under gravity from it, the proposal's unknown orientation),
+    and a bright nutrition-label patch sits on the wall at `label_yaw`.
     """
     g = mujoco.mjtGeom
     r = CAN_RADIUS * float(rng.uniform(0.95, 1.05))
@@ -72,6 +97,7 @@ def _add_can(world: mujoco.MjSpec, condition: ConditionClass, rng: np.random.Gen
     ang = float(rng.uniform(0.0, 2.0 * np.pi))
     ox, oy = mag * float(np.cos(ang)), mag * float(np.sin(ang))  # graspable-centroid shift
     can = world.worldbody.add_body(name="can", pos=list(pos))
+    can.quat = list(quat)
     can.add_freejoint()
 
     if condition is ConditionClass.BODY_DENT:
@@ -97,13 +123,38 @@ def _add_can(world: mujoco.MjSpec, condition: ConditionClass, rng: np.random.Gen
     else:  # NOMINAL
         can.add_geom(name="can_geom", type=g.mjGEOM_CYLINDER, size=[r, h, 0.0], rgba=_METAL)
 
+    # The nutrition-label band: a tall bright panel on the lower wall, its +x face pointing
+    # radially out (the label normal). It sits low on the can so a grasp near the top rim
+    # leaves it exposed (the gripper does not cover the label), and the robot reorients the can
+    # to turn this face toward the inspection camera for verification (proposal task).
+    lx, ly = r * float(np.cos(label_yaw)), r * float(np.sin(label_yaw))
+    label = can.add_geom(
+        name="can_label", type=g.mjGEOM_BOX, size=[0.002, 0.014, 0.024],
+        pos=[lx + ox, ly + oy, -0.018], rgba=_LABEL,
+    )
+    label.quat = [float(np.cos(label_yaw / 2)), 0.0, 0.0, float(np.sin(label_yaw / 2))]
+    # "This side up" marker: a bright stripe at the TOP edge of the label (toward the can's local
+    # +z, deterministic). Makes the label's up-direction visible in renders, so a presented label
+    # is verifiably right-side-up, never upside down.
+    top_marker = can.add_geom(
+        name="can_label_top", type=g.mjGEOM_BOX, size=[0.0025, 0.014, 0.004],
+        pos=[lx + ox, ly + oy, -0.018 + 0.024 - 0.004], rgba=[0.10, 0.45, 0.95, 1.0],
+    )
+    top_marker.quat = label.quat
+
 
 def build_scene(
     can_pos: tuple[float, float, float] = (0.5, 0.0, CAN_HALF_HEIGHT),
     condition: ConditionClass = ConditionClass.NOMINAL,
     can_seed: int = 0,
+    can_quat: tuple[float, float, float, float] = (1.0, 0.0, 0.0, 0.0),
 ) -> mujoco.MjModel:
-    """Compose Gen3 + Robotiq 2F-85 + a condition-specific can + overhead camera."""
+    """Compose Gen3 + Robotiq 2F-85 + a condition-specific can + overhead camera.
+
+    `can_quat` is the can's initial placement orientation (identity = upright). The caller
+    spawns it slightly above the table and lets it settle, so an arbitrary `can_quat` gives
+    the proposal's unknown initial orientation (upright or lying).
+    """
     world = mujoco.MjSpec.from_file(str(_GEN3_SCENE))
     gripper = mujoco.MjSpec.from_file(str(_GRIPPER))
 
@@ -116,13 +167,20 @@ def build_scene(
     # Attach the gripper at the Gen3 tool flange (pinch_site on bracelet_link).
     world.attach(gripper, prefix="gripper_", site=world.site("pinch_site"))
 
-    _add_can(world, condition, np.random.default_rng(can_seed), can_pos)
+    _add_can(
+        world, condition, np.random.default_rng(can_seed),
+        can_pos, can_quat, can_label_yaw(can_seed),
+    )
 
-    # Static top-down overhead camera looking straight down at the workspace.
-    world.worldbody.add_camera(
+    # Static top-down overhead camera, a ceiling-mounted RGB-D looking straight down. Mounted
+    # high (real ceiling-Kinect standoff) with a narrow FOV so the small gripper does not
+    # occlude the label the robot presents beneath it (a low camera occludes, a real one does
+    # not). This camera reads the label-visibility ground truth (RGB legibility + coverage).
+    cam = world.worldbody.add_camera(
         name="overhead",
-        pos=[can_pos[0], can_pos[1], 0.9],
+        pos=[can_pos[0], can_pos[1], OVERHEAD_CAM_HEIGHT],
         xyaxes=[1, 0, 0, 0, 1, 0],
     )
+    cam.fovy = OVERHEAD_CAM_FOVY
 
     return world.compile()
