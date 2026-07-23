@@ -85,7 +85,8 @@ def build(streams_dir: Path, out_dir: Path, repo_id: str, limit: int | None) -> 
                 "observation.images.overhead": over[t],
                 "observation.images.wrist": wrist[t],
                 "action": action,
-            }, task="present the nutrition label to the overhead camera")
+                "task": "present the nutrition label to the overhead camera",   # LeRobot 0.4.4: task is a frame key
+            })
         ds.save_episode()
     print(f"built LeRobotDataset '{repo_id}' at {out_dir}: {len(recs)} episodes")
 

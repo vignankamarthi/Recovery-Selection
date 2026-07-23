@@ -33,8 +33,12 @@ lerobot-train \
   --dataset.root="$DATASET_ROOT" \
   --policy.type=act \
   --policy.device=cuda \
+  --policy.push_to_hub=false \
   --output_dir="$OUTPUT" \
   --job_name=harvest_act_sim_v1 \
-  --wandb.enable=false
+  --wandb.enable=false \
+  --batch_size=64 \
+  --steps=40000 \
+  --save_freq=10000
 
 echo "trained ACT -> $OUTPUT"

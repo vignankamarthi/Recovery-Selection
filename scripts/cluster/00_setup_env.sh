@@ -17,6 +17,8 @@ conda activate "$ENV"
 pip install torch==2.11.0 torchvision --index-url https://download.pytorch.org/whl/cu128
 pip install lerobot                      # ACT policy + LeRobotDataset + lerobot-train CLI
 pip install mujoco numpy rosbags         # our sim + io deps (schema/harvest are pure-python, run from src/)
+pip install robot_descriptions           # Kinova Gen3 + Robotiq models (clones MuJoCo Menagerie on first import)
+conda install -c conda-forge ffmpeg -y   # libavutil/libavcodec so torchcodec can DECODE the video streams during training
 
 # Verify Blackwell CUDA is live (must print True; a False means the torch build is too old).
 python -c "import torch; print('cuda:', torch.cuda.is_available(), torch.cuda.get_device_name(0) if torch.cuda.is_available() else '')"
