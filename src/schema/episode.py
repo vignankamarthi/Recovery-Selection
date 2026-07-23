@@ -30,6 +30,19 @@ class Outcome(str, Enum):
     FAILURE = "failure"
 
 
+class CompetenceTier(str, Enum):
+    """Where an episode sits relative to the policy's competence, one of four tiers each mapping to
+    one recovery arm (Part 2). The control-invariant safe set is a hard floor beneath the arms, not
+    a tier. Assigned in Part 1 (1.10) from a held-out margin as a PROXY, replaced by the real ACT
+    latent signal later. The only recovery concept the schema carries, so both tracks share it
+    without breaking the fence."""
+
+    IN_REGION = "in_region"                # -> retry (transient, within competence)
+    BOUNDARY = "boundary"                  # -> rewind and re-approach (at the edge)
+    OUTSIDE_PLANNABLE = "outside_plannable"  # -> replan (outside competence, still plannable)
+    OUTSIDE_RISKY = "outside_risky"        # -> ask-human (outside and risky)
+
+
 class LabelProvenance(str, Enum):
     """How a label was produced. Tactile-derived labels are flagged so the eventual
     tactile ablation cannot silently confound (HARVEST flag F7)."""
