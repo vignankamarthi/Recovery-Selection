@@ -53,7 +53,14 @@ def rollout_one(policy, cond: ConditionClass, can_id: str, device) -> bool:
     policy.reset()
     for _ in range(HORIZON):
         obs = _obs(w)
-        batch = {k: torch.from_numpy(v)[None].to(device) for k, v in obs.items()}
+        batch = {}
+        for k, v in obs.items():
+            t = torch.from_numpy(v)
+            if "image" in k:
+                t = t.permute(2, 0, 1).float() / 255.0   # HWC uint8 -> CHW float [0,1] (LeRobot convention)
+            else:
+                t = t.float()
+            batch[k] = t[None].to(device)
         with torch.no_grad():
             action = policy.select_action(batch)[0].cpu().numpy()   # next joint target (VERIFY API)
         w.data.qpos[:7] = action[:7]

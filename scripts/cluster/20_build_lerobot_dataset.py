@@ -32,33 +32,39 @@ from schema.streams import Modality
 FPS = 10                          # nominal; our sim timestamps are synthetic, ACT uses frame order
 
 
-def _train_can_ids(streams_dir: Path) -> set[str]:
-    """The by-can TRAIN split. Prefer the Mac-side metadata.jsonl (has the split); else recompute."""
+def _split_can_ids(streams_dir: Path, wanted: set[str]) -> set[str]:
+    """The by-can ids in the wanted split(s), e.g. {'train'} or {'val','test'} (held-out)."""
     meta = streams_dir / "metadata.jsonl"
     if meta.exists():
         return {json.loads(l)["can_id"] for l in meta.read_text().splitlines()
-                if l.strip() and json.loads(l)["split"] == "train"}
+                if l.strip() and json.loads(l)["split"] in wanted}
     # Fallback: recompute the identical deterministic split from the episodes present.
     from harvest.dataset.splits import split_by_can
     from harvest.io._serde import episode_from_dict
     eps = [episode_from_dict(json.loads(l)["episode"] if "episode" in json.loads(l) else json.loads(l))
            for l in (streams_dir / "episodes.jsonl").read_text().splitlines() if l.strip()]
-    return set(split_by_can(eps, seed=0).train_can_ids)
+    sp = split_by_can(eps, seed=0)
+    ids = set()
+    if "train" in wanted: ids |= set(sp.train_can_ids)
+    if "val" in wanted: ids |= set(sp.val_can_ids)
+    if "test" in wanted: ids |= set(sp.test_can_ids)
+    return ids
 
 
 def _sorted(samples):
     return [s.data for s in sorted(samples, key=lambda s: s.timestamp_ns)]
 
 
-def build(streams_dir: Path, out_dir: Path, repo_id: str, limit: int | None) -> None:
+def build(streams_dir: Path, out_dir: Path, repo_id: str, limit: int | None,
+          wanted_splits: set[str] = frozenset({"train"})) -> None:
     from lerobot.datasets.lerobot_dataset import LeRobotDataset   # API path VERIFY on cluster
 
-    train_cans = _train_can_ids(streams_dir)
-    recs = [r for r in load_export(streams_dir) if r.episode.can_id in train_cans]
+    cans = _split_can_ids(streams_dir, set(wanted_splits))
+    recs = [r for r in load_export(streams_dir) if r.episode.can_id in cans]
     if limit:
         recs = recs[:limit]
     if not recs:
-        raise SystemExit("no train-split episodes found under " + str(streams_dir))
+        raise SystemExit(f"no episodes for splits {wanted_splits} found under {streams_dir}")
 
     # Infer shapes from the first episode.
     r0 = recs[0]
@@ -97,5 +103,8 @@ if __name__ == "__main__":
     ap.add_argument("--out", required=True, help="LeRobotDataset root")
     ap.add_argument("--repo-id", default="harvest/act_sim_v1")
     ap.add_argument("--limit", type=int, default=None, help="build only N episodes (integration test)")
+    ap.add_argument("--split", choices=["train", "heldout"], default="train",
+                    help="train (for training) or heldout = val+test (for the prediction metric)")
     a = ap.parse_args()
-    build(Path(a.streams), Path(a.out), a.repo_id, a.limit)
+    splits = {"train"} if a.split == "train" else {"val", "test"}
+    build(Path(a.streams), Path(a.out), a.repo_id, a.limit, splits)
