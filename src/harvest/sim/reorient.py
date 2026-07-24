@@ -256,21 +256,37 @@ def _glide(w: SimWorld, snap: np.ndarray, on_step: OnStep = None, steps: int = 2
         on_step()
 
 
-def _roll_z(a: float) -> np.ndarray:
-    c, s = np.cos(a), np.sin(a)
-    return np.array([[c, -s, 0], [s, c, 0], [0, 0, 1.0]])
+def _axis_angle(axis: np.ndarray, ang: float) -> np.ndarray:
+    """Rotation matrix for a rotation of `ang` radians about unit `axis` (Rodrigues' formula)."""
+    a = axis / np.linalg.norm(axis)
+    c, s = np.cos(ang), np.sin(ang)
+    x, y, z = a
+    C = 1.0 - c
+    return np.array([
+        [c + x * x * C, x * y * C - z * s, x * z * C + y * s],
+        [y * x * C + z * s, c + y * y * C, y * z * C - x * s],
+        [z * x * C - y * s, z * y * C + x * s, c + z * z * C],
+    ])
 
 
 def _slip_roll(w: SimWorld, severity: float, on_step: OnStep = None, steps: int = 8) -> None:
-    """Roll the held can about its OWN long axis by a severity-scaled angle, so the presented
-    label rolls off the top. Done over several steps (the weld carrying the can) so the slip shows
-    up in the recorded streams as a progressive shift, not a teleport."""
-    weld = Weld(w)
-    R_rel0 = weld.R_rel.copy()
+    """A damaged can SLIPS: the ARM rolls the grasped can about the can's OWN long axis, driven by IK
+    on the end-effector orientation, so the presented label rolls off the top of the overhead view.
+    Rolling THROUGH THE ARM (not by rewriting the can's weld offset) puts the failure in the ACTION
+    SPACE ACT imitates: IK adjusts all seven arm joints, so a damaged can's arm trajectory differs
+    from a nominal can's, the demos are teachable, and Part 2's recovery has an arm action to act on.
+    The weld carries the can rigidly with the hand, and the roll is spread over several recorded steps
+    so the slip is a progressive shift, not a teleport."""
+    weld = Weld(w)                                       # keep the can-in-hand offset fixed
     total = np.radians(MAX_SLIP_DEG) * float(severity)
+    axis = w.can_long_axis()
+    axis = axis / np.linalg.norm(axis)                   # roll about the can's own long axis (world frame)
+    pos = w.pinch_position()                             # hold the pinch point; only its orientation rolls
+    R0 = w.pinch_rotation()
     for i in range(1, steps + 1):
-        weld.R_rel = R_rel0 @ _roll_z(total * i / steps)     # rotate about the can's local z (long axis)
-        weld.follow()
+        target = _axis_angle(axis, total * i / steps) @ R0
+        w.move_pinch_pose(pos, target, max_steps=10, damping=0.1, rot_gain=0.4, on_step=weld.follow)
+        weld.follow()                                    # can follows the rolled hand rigidly
         if on_step is not None:
             on_step()
 
