@@ -1,12 +1,13 @@
-"""Dataset export adapter (the dissemination seam, Phase 1.3).
+"""Flat npz + jsonl dataset export adapter (the dissemination seam, Phase 1.3).
 
 Separate from rosbag2: rosbag2 is the lab/robot boundary, this is the public-dataset
 boundary. Neither leaks format knowledge upstream.
 
-MINIMAL export (honest scope): a HuggingFace-loadable flat layout, one `episodes.jsonl`
-of episode metadata plus a per-episode `.npz` of the stream arrays. This round-trips
-metadata and arrays exactly. Full LeRobot v2 spec conformance (chunked parquet, the
-standard `meta/` schema) is a later refinement, not claimed here.
+This writes a FLAT layout (hence the module name): one `episodes.jsonl` of episode metadata
+plus a per-episode `.npz` of the stream arrays, HuggingFace-loadable and round-tripping metadata
+and arrays exactly. It is NOT the LeRobot v2 on-disk format (chunked parquet, the standard `meta/`
+schema); that conversion, when needed for lerobot-train, is done separately on the cluster by
+`scripts/cluster/20_build_lerobot_dataset.py`.
 """
 
 from __future__ import annotations

@@ -1,8 +1,8 @@
-"""Tests for the io adapters (Phase 1.3): rosbag2 (mcap) round-trip + LeRobot export."""
+"""Tests for the io adapters (Phase 1.3): rosbag2 (mcap) round-trip + flat npz/jsonl export."""
 
 import numpy as np
 
-from harvest.io.lerobot_adapter import export_dataset, load_export
+from harvest.io.flat_npz_adapter import export_dataset, load_export
 from harvest.io.rosbag2_adapter import read_episode, write_episode
 from schema.episode import (
     ConditionClass,
@@ -76,7 +76,7 @@ def test_rosbag2_round_trip_preserves_samples_exactly(tmp_path):
             np.testing.assert_array_equal(np.asarray(b.data), np.asarray(a.data))
 
 
-def test_lerobot_export_round_trips_metadata_and_arrays(tmp_path):
+def test_flat_npz_export_round_trips_metadata_and_arrays(tmp_path):
     rec = _make_recorded()
     out = tmp_path / "hf"
     export_dataset([rec], out)
@@ -94,7 +94,7 @@ def test_per_episode_write_plus_index_matches_batch_export(tmp_path):
     # Parallel/resumable generation writes each episode's streams on its own, then assembles the
     # index. The result must round-trip identically to a batch export_dataset (same fence seam,
     # so a sharded cluster run and a local batch run produce the same dataset).
-    from harvest.io.lerobot_adapter import write_episode_streams, write_index
+    from harvest.io.flat_npz_adapter import write_episode_streams, write_index
 
     rec = _make_recorded()
     out = tmp_path / "sharded"

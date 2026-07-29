@@ -2,7 +2,7 @@
 
 Writes the HuggingFace-loadable METADATA table, one row per episode tagged with its by-can
 split, plus the human-facing README card. The raw sensor arrays are large binary and are
-exported through the io/lerobot adapter (the on-disk format boundary), referenced here by
+exported through the io/flat_npz adapter (the on-disk format boundary), referenced here by
 `episode_id`. This keeps the dataset layer free of any on-disk format knowledge.
 """
 
@@ -14,23 +14,14 @@ from typing import Iterable
 
 from harvest.dataset.card import dataset_card
 from harvest.dataset.splits import Split, assigned_split
+from harvest.io._serde import episode_to_dict
 from schema.episode import Episode
 
 
 def _row(episode: Episode, split: Split) -> dict:
-    return {
-        "episode_id": episode.episode_id,
-        "can_id": episode.can_id,
-        "condition": episode.condition.value,
-        "outcome": episode.outcome.value if episode.outcome is not None else None,
-        "split": assigned_split(split, episode),
-        "stream_keys": list(episode.stream_keys),
-        "labels": [
-            {"name": l.name, "value": l.value, "provenance": l.provenance.value}
-            for l in episode.labels
-        ],
-        "metadata": episode.metadata,      # carries the 1.10 competence_tier tag
-    }
+    # Reuse the shared episode -> dict encoding (id, can_id, condition, outcome, stream_keys, labels,
+    # metadata -- the metadata carries the 1.10 competence_tier tag), adding only the by-can split tag.
+    return {**episode_to_dict(episode), "split": assigned_split(split, episode)}
 
 
 def to_hf_rows(episodes: Iterable[Episode], split: Split) -> list[dict]:

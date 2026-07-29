@@ -1,6 +1,6 @@
 """Shared (de)serialization of Episode metadata to/from a plain dict (Phase 1.3).
 
-Used by both io adapters (rosbag2 and lerobot) so episode metadata is encoded one way.
+Used by both io adapters (rosbag2 and flat_npz) so episode metadata is encoded one way.
 Enums go to their `.value`; reconstruction restores them. stdlib only.
 """
 

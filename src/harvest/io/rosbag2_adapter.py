@@ -1,8 +1,10 @@
 """rosbag2 I/O adapter (the storage seam, Phase 1.3).
 
-rosbag2 is the canonical on-disk format (lab/ROS2-native). This adapter is the ONLY
-place that knows the format. It uses the pure-Python `rosbags` library, so files are
-written and read on macOS with NO ROS2 install, and load natively on the lab's Linux
+This is the hardware / ROS2 on-disk boundary: rosbag2 is the canonical lab/ROS2-native format,
+and this adapter is the ONLY place that knows it. It is tested for round-trip fidelity but is NOT
+on the shipped sim generation path (that writes flat npz via `io/flat_npz_adapter.py`); it is the
+seam the real-robot collection uses on hardware. It uses the pure-Python `rosbags` library, so
+files are written and read on macOS with NO ROS2 install, and load natively on the lab's Linux
 ROS2 Humble machines.
 
 Encoding: one `/episode/meta` topic (std_msgs/String, JSON of the episode metadata and a
