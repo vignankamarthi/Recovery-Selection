@@ -1,4 +1,7 @@
-"""Parallel, resumable, sharded dataset generation (SCRATCH RUNNER, gitignored).
+"""Parallel, resumable, sharded dataset generation (committed cluster runner).
+
+Lives in scripts/cluster/ and is invoked from the repo root (it puts src/ and . on sys.path):
+    python scripts/cluster/gen_dataset_parallel.py <mode> ...
 
 Each episode is a pure deterministic function of (condition, can index, pose index), so generation
 is embarrassingly parallel: shard by episode index, and any worker reproduces any episode exactly.
@@ -9,9 +12,9 @@ episodes whose .npz already exists.
 The heavy .npz streams are meant to live on CLUSTER storage (ACT trains there); the Mac keeps only
 the assembled metadata + split + card. Modes:
 
-    python gen_dataset_parallel.py shard    --k K --n N --out DIR   # one shard (SLURM array task)
-    python gen_dataset_parallel.py assemble  --out DIR              # metadata.jsonl + split + card
-    python gen_dataset_parallel.py local     --n W  --out DIR       # W shards as subprocesses + assemble
+    python scripts/cluster/gen_dataset_parallel.py shard    --k K --n N --out DIR  # one shard (SLURM array task)
+    python scripts/cluster/gen_dataset_parallel.py assemble  --out DIR             # metadata.jsonl + split + card
+    python scripts/cluster/gen_dataset_parallel.py local     --n W  --out DIR      # W shards + assemble
 
 Sizing via --cans (per condition) and --poses. 600 episodes = --cans 40 --poses 3.
 """
@@ -54,9 +57,9 @@ def episode_pose(can_id: str, p: int):
 
 
 def run_shard(k: int, n: int, out: Path, cans: int, poses: int, streams: bool = True) -> None:
-    from harvest.io.lerobot_adapter import write_episode_streams
+    from harvest.io.flat_npz_adapter import write_episode_streams
     from harvest.io._serde import episode_to_dict
-    from harvest.sim.episode import LYING_QUAT, DEFAULT_MODALITIES, record_episode
+    from harvest.sim.episode import LYING_QUAT, DEFAULT_MODALITIES, record_sim_demo
     from schema.episode import Episode
 
     (out / "meta").mkdir(parents=True, exist_ok=True)
@@ -75,8 +78,8 @@ def run_shard(k: int, n: int, out: Path, cans: int, poses: int, streams: bool = 
         # Metadata-only mode still runs the full sim (the outcome IS the sim result), it just does
         # not persist the heavy stream arrays. Those get materialized on the cluster at ACT time.
         mods = DEFAULT_MODALITIES if streams else (DEFAULT_MODALITIES[0],)
-        rec = record_episode(Episode(eid, can_id, cond), can_pos=episode_pose(can_id, p),
-                             modalities=mods, can_quat=LYING_QUAT)
+        rec = record_sim_demo(Episode(eid, can_id, cond), can_pos=episode_pose(can_id, p),
+                              modalities=mods, can_quat=LYING_QUAT)
         manifest = write_episode_streams(rec, out) if streams else {"episode": episode_to_dict(rec.episode)}
         (out / "meta" / f"{eid}.json").write_text(json.dumps(manifest))
         made += 1
@@ -87,7 +90,7 @@ def run_shard(k: int, n: int, out: Path, cans: int, poses: int, streams: bool = 
 
 
 def assemble(out: Path) -> None:
-    from harvest.io.lerobot_adapter import write_index
+    from harvest.io.flat_npz_adapter import write_index
     from harvest.io._serde import episode_from_dict
     from harvest.dataset.card import dataset_stats, render_split_table
     from harvest.dataset.competence import tag_competence

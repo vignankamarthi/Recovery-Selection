@@ -7,7 +7,7 @@ GATE 3 (the ACT baseline review), per PLAN.md.
 
 ## Dataset under audit
 
-`data/harvest_sim_v1/` (regenerable via `gen_dataset_parallel.py`). 600 episodes over 200 distinct
+`data/harvest_sim_v1/` (regenerable via `scripts/cluster/gen_dataset_parallel.py`). 600 episodes over 200 distinct
 cans (5 conditions x 40 cans x 3 poses). The Mac holds metadata only, the heavy per-episode streams
 are materialized on the cluster at ACT time. Three graded labels plus the held-out `label_up_cos`
 margin. All numbers below come from `metadata.jsonl`.

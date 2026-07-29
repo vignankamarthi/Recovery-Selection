@@ -26,6 +26,6 @@ cd "$REPO"
 export MUJOCO_GL=egl                                # headless GL on the GPU node (NOT cgl, that is macOS)
 # 16 deterministic shards, resumable (skips episodes whose .npz already exists). Records all 7
 # modalities (DEFAULT_MODALITIES). --cans 40 --poses 3 = 600 episodes.
-python gen_dataset_parallel.py local --n 16 --out "$OUT" --cans 40 --poses 3
+python scripts/cluster/gen_dataset_parallel.py local --n 16 --out "$OUT" --cans 40 --poses 3
 echo "materialized streams at $OUT"
 du -sh "$OUT"

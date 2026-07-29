@@ -5,6 +5,8 @@ ANTIPATTERNS.md
 PLAN.md
 HARVEST-DESIGN-REVIEW.md
 VENUE-TIMELINE.md
+HARDWARE.md
+RECOVERY-GROUNDING-TEMPLATE.md
 
 # Python
 __pycache__/
@@ -46,4 +48,4 @@ sim_present.py
 # Generated sim datasets (regenerable; the data itself is not committed)
 data/
 scripts_gen_dataset.py
-# NOTE: gen_dataset_parallel.py is NOT ignored -- the cluster materialization needs it (committed).
+# NOTE: scripts/cluster/gen_dataset_parallel.py is committed (the cluster materialization needs it).

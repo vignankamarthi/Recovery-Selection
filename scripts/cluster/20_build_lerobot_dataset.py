@@ -8,7 +8,7 @@ LeRobotDataset with the ACT feature keys:
   action                     -> next-step joint targets (proprioception[t+1]; last frame repeats)
 
 Only TRAIN-split episodes go in (the by-can split from metadata.jsonl); val/test are held out for
-the sim rollout eval (40_eval_rollout.py), not seen by lerobot-train.
+the dataloader-scored eval (80_rigorous_eval.py), not seen by lerobot-train.
 
 UNTESTED until the cluster (no local torch/lerobot). The LeRobotDataset creation API has churned
 across LeRobot versions, so integration-test with ONE episode on the GPU before the full build:
@@ -26,7 +26,7 @@ import numpy as np
 import sys
 sys.path.insert(0, "src")
 
-from harvest.io.lerobot_adapter import load_export
+from harvest.io.flat_npz_adapter import load_export
 from schema.streams import Modality
 
 FPS = 10                          # nominal; our sim timestamps are synthetic, ACT uses frame order
@@ -99,7 +99,8 @@ def build(streams_dir: Path, out_dir: Path, repo_id: str, limit: int | None,
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--streams", required=True, help="dir written by gen_dataset_parallel (data/ + *.jsonl)")
+    ap.add_argument("--streams", required=True,
+                    help="dir written by scripts/cluster/gen_dataset_parallel (data/ + *.jsonl)")
     ap.add_argument("--out", required=True, help="LeRobotDataset root")
     ap.add_argument("--repo-id", default="harvest/act_sim_v1")
     ap.add_argument("--limit", type=int, default=None, help="build only N episodes (integration test)")
