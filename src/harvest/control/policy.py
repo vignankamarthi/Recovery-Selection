@@ -13,15 +13,16 @@ from typing import Callable, Optional, Protocol
 
 import numpy as np
 
-from harvest.control.backend import RobotBackend
+from harvest.control.backend import GraspBackend, RobotBackend
 
 OnStep = Optional[Callable[[], None]]
 
 
 class ManipulationPolicy(Protocol):
-    """Runs a manipulation on a backend, driving control and returning grasp success."""
+    """Runs a manipulation on a backend, driving control and returning grasp success. Needs both
+    control and scene ground truth, so it is typed against `GraspBackend` (the composition)."""
 
-    def run(self, backend: RobotBackend, on_step: OnStep = None) -> bool: ...
+    def run(self, backend: GraspBackend, on_step: OnStep = None) -> bool: ...
 
 
 class ScriptedGraspPolicy:
@@ -31,28 +32,39 @@ class ScriptedGraspPolicy:
     finger yaw works. A lying can needs the fingers across its short (diameter) axis, so the
     wrist roll is held at long-axis + 90 degrees while joints 1-6 reach. Returns grasp success
     from backend ground truth (F7, never the tactile stream).
+
+    Two knobs let the sim demonstration reuse this exact open->approach->descend->close->settle
+    sequence: `head_offset_m` grasps that far along a lying can's long axis (the head, not the
+    middle), and `lift=False` skips the final lift (the weld-assisted reorient does not lift).
     """
 
-    def __init__(self, settle: int = 40, top_settle: int = 20) -> None:
+    def __init__(self, settle: int = 40, top_settle: int = 20,
+                 head_offset_m: float = 0.0, lift: bool = True, lift_height_m: float = 0.18) -> None:
         self.settle = settle
         self.top_settle = top_settle
+        self.head_offset_m = head_offset_m
+        self.lift = lift
+        self.lift_height_m = lift_height_m
 
-    def run(self, backend: RobotBackend, on_step: OnStep = None) -> bool:
+    def run(self, backend: GraspBackend, on_step: OnStep = None) -> bool:
         can = backend.can_position()
         if backend.can_is_upright():
             wrist, descend = None, 0.02
         else:
             axis = backend.can_long_axis()
+            axis = axis / np.linalg.norm(axis)
             wrist = backend.aligned_wrist(float(np.arctan2(axis[1], axis[0])) + np.pi / 2.0)
             descend = 0.0
+            can = can + self.head_offset_m * axis                    # grasp the head, not the middle
 
         backend.set_gripper(0.0)                                      # open
         backend.move_pinch_to(can + [0, 0, 0.12], wrist=wrist, on_step=on_step)   # approach
         backend.move_pinch_to(can + [0, 0, descend], wrist=wrist, on_step=on_step)  # descend
         backend.set_gripper(1.0)                                      # close
         self._settle(backend, self.settle, on_step)
-        backend.move_pinch_to(can + [0, 0, 0.18], wrist=wrist, on_step=on_step)   # lift
-        self._settle(backend, self.top_settle, on_step)
+        if self.lift:
+            backend.move_pinch_to(can + [0, 0, self.lift_height_m], wrist=wrist, on_step=on_step)  # lift
+            self._settle(backend, self.top_settle, on_step)
         return backend.grasp_success()
 
     @staticmethod
