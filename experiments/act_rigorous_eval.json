@@ -1,0 +1,25 @@
+{
+  "seed": 0,
+  "train": {
+    "l1_eval": 0.070621327695917,
+    "l1_no_move": 0.5577586728210465,
+    "beats_no_move": true,
+    "loss_components": {
+      "l1_loss": 0.005693947207307472,
+      "kld_loss": 7.104268647971649e-06
+    },
+    "n_frames": 54540
+  },
+  "heldout": {
+    "l1_eval": 0.7722436263125265,
+    "l1_no_move": 0.6000907812042342,
+    "beats_no_move": false,
+    "loss_components": {
+      "l1_loss": 0.05028745766760566,
+      "kld_loss": 7.113446115173335e-06
+    },
+    "n_frames": 22710
+  },
+  "l1_eval_gap": 0.7016222986166095,
+  "note": "l1_eval = eval-mode (z=prior) predicted-action L1 via predict_action_chunk, scored through LeRobot's dataloader (obs match training). ACT is meaningful iff l1_eval < l1_no_move on held-out (beats the trivial no-move predictor); a small l1_eval_gap = generalizes to unseen cans."
+}

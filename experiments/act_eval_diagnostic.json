@@ -1,0 +1,31 @@
+{
+  "chunk_size": 100,
+  "train": {
+    "per_condition": {
+      "unknown": {
+        "l1_eval": 0.07062132807925754,
+        "l1_no_move": 0.5577586757562824,
+        "beats_no_move": true
+      }
+    },
+    "action0_vs_state_l1": 0.15965314418716298,
+    "action_raw_range": [
+      -65.0486831665039,
+      62.15277099609375
+    ]
+  },
+  "heldout": {
+    "per_condition": {
+      "unknown": {
+        "l1_eval": 0.7722436243400466,
+        "l1_no_move": 0.6000907792686246,
+        "beats_no_move": false
+      }
+    },
+    "action0_vs_state_l1": 0.1723974679413235,
+    "action_raw_range": [
+      -59.50703430175781,
+      57.560909271240234
+    ]
+  }
+}
