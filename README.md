@@ -1,55 +1,171 @@
 # Harvest-Recovery
 
-A RIVeR Lab build that does two things in one repo, cleanly fenced.
+A RIVeR Lab build that does two things in one repo, cleanly fenced. Read `ARCHITECTURE.md`
+for how the software is built, and `PLAN.md` for what is done and what is next.
 
-**Part 1, the HARVEST platform.** A multimodal data-collection framework for condition-aware robotic manipulation of canned goods (synchronized recording, episode protocol, annotation, by-can dataset packaging), built robot-free in simulation and ready to run on the real Kinova. On the collected dataset we train an **ACT imitation-learning baseline** and run a **tactile ablation** (does tactile help the policy on damaged cans). This is the HARVEST-Touch dataset + baseline, targeting **IEEE RA-L**. PI Prof. Taskin Padir, partner Good Shepherd Food Bank of Maine, robot + HRI coordinated with Lorena Genua.
+**Part 1, the HARVEST platform.** A multimodal data-collection framework for condition-aware robotic
+manipulation of canned goods (seven synchronized streams, episode protocol, by-can dataset packaging),
+built robot-free in simulation and ready to run on the real Kinova. On the collected dataset we train an
+**ACT imitation-learning baseline** and run a **tactile ablation** (does tactile help the policy on
+damaged cans). Targets **IEEE RA-L**. PI Prof. Taskin Padir, partner Good Shepherd Food Bank of Maine.
 
-**Part 2, our research contribution: recovery-selection.** Learning *which* recovery a failed manipulation policy should run. When a learned policy fails, the best way to recover depends on what kind of failure occurred, yet every current system hard-codes a single recovery behavior. Recovery-selection makes recovery-strategy *selection* a learnable, cost-aware decision problem, and aims to show that a small learned selector beats any fixed single-mechanism baseline at matched intervention budget. The failures the HARVEST policy makes on damaged cans are not noise to discard, they are the substrate the recovery layer consumes. Targets **CoRL 2027** (ICRA workshop on-ramp).
+**Part 2, recovery-selection (our contribution).** Learning _which_ recovery a failed policy should run.
+When a learned policy fails, the best recovery depends on the kind of failure, yet current systems
+hard-code a single recovery behavior. We make recovery-strategy selection a learnable, cost-aware
+decision (four competence tiers -> four recovery arms, chosen under a budget), and aim to show a small
+learned selector beats any fixed single-mechanism baseline at matched intervention budget. The failures
+the HARVEST policy makes on damaged cans are the substrate the recovery layer consumes. Targets **CoRL
+2027** (ICRA workshop on-ramp).
 
 ## The task
 
-Condition-aware in-hand pick-and-reorient. The robot grasps a can of unknown orientation and reorients it in hand to expose the nutrition label, then a camera verifies the label is legible and covers enough of the frame. A dented or bulged can has different grasp affordances and in-hand reorientation dynamics than a nominal one, so failures are frequent, varied, and safety-relevant, and in-hand reorientation is exactly where tactile sensing helps most.
-
-## The gap (Part 2)
-
-Robot-failure recovery is splintered into siloed lines that each commit to one mechanism, whether retry/rewind (RaC, SPR), local-RL recovery (RecoveryChaining), VLM re-planning (FailSafe, SC-VLA), or human hand-off (the Cornell HITL framework, HRI 2026). Each works only in the regime it assumes. To our knowledge, no single system does all three at once, (a) typing failures by their relation to a policy's *competence region*, (b) learning a meta-policy that selects among three or more heterogeneous recovery mechanisms under explicit cost/risk constraints, and (c) evaluating on real-robot rollouts with monolithic end-to-end policies.
-
-## Contribution (Part 2)
-
-- **Competence-grounded failure taxonomy.** Failure type is the state's relation to the frozen ACT policy's competence region (latent-state density + action-head ensemble disagreement, with a control-invariant safe set as the hard anchor), not a semantic error label. The state's position sorts it into one of four competence tiers.
-- **A learned meta-policy over heterogeneous recoveries.** A cost-sensitive selector maps (failure features, competence signals, task context) to one of four recovery arms (retry, rewind and re-approach, re-plan, ask-human), under a Lagrangian budget on the ask-human arm. The tier is the competence prior, and the selector is the cost-aware chooser that can deviate from the default arm under budget and risk. The control-invariant safe set is a hard floor beneath the arms, not a selectable arm.
-- **Counterfactual recovery evaluation.** Reset-and-replay the full four-arm grid per injected failure to obtain a per-failure oracle and a new metric, *recovery-regret* (realized cost minus oracle cost), replacing binary recovery-success.
+Condition-aware in-hand pick-and-reorient. The robot grasps a can of unknown orientation and reorients it
+in hand to expose the nutrition label, then the overhead camera verifies the label is legible and covers
+enough of the frame. A dented or bulged can reorients differently than a nominal one, so it slips more,
+and in-hand reorientation is exactly where tactile sensing earns its keep. The slip is a feature, it is
+both the tactile signal Part 1 measures and the failure substrate Part 2 recovers from.
 
 ## Status
 
-Software build phase, sim-first. `proposal/PROPOSAL.tex` is the source of truth. Padir's original brief (`../HARVEST Touch Intern Project.docx`) is the draft it corrects and extends. Part 0 (HARVEST design review, flags F1-F7) is done and folded into the proposal. We build all software robot-free (Part 1 framework + ACT baseline, then Part 2 recovery) before touching hardware, so collection begins the day the arm is available. The internal plan is `PLAN.md`.
+Software build phase, sim-first. Milestone 1 (the HARVEST framework + the ACT baseline pipeline) is
+functionally complete. The simulation is a **smoke test**, it validates the recording and training
+pipeline but its ACT numbers are not trusted as evidence (see `ACT-EVAL-AUDIT.md` for why, the scripted
+demo's target is not a learnable function of the observation). The reported ACT baseline and tactile
+ablation come from the **hardware** dataset, where demonstrations are human teleop. Next is the hardware
+on-ramp. `proposal/PROPOSAL.tex` is the source of truth for scope and method.
+
+## Quickstart
+
+```bash
+# tests (synthetic data only, macOS uses the CGL offscreen GL backend)
+MUJOCO_GL=cgl .venv/bin/python -m pytest
+
+# watch the simulator live (the scripted demonstration)
+./watch_sim.sh              # optional [seed]
+
+# generate the sim dataset locally (metadata by default; streams are heavy)
+.venv/bin/python scripts/cluster/gen_dataset_parallel.py --help
+
+# the AICR cluster run (materialize -> build LeRobot dataset -> train ACT -> eval).
+# the playbook lives here.
+cat scripts/cluster/README.md
+```
 
 ## Layout
 
 ```
-proposal/              LaTeX: PROPOSAL.tex -> PROPOSAL.pdf
-src/
-  schema/              the contract: episode + stream representation (dependency-light)
-  harvest/             PART 1: sensors/ recorder/ protocol/ sim/ io/ annotation/ dataset/ policy/
-  recovery/            PART 2: competence/ arms/ grid/ metric/ selector/   (on top, fenced)
-tests/                 mirrors src/; TDD, synthetic data only
-experiments/           per-run artifact dirs (planned)
+Harvest-Recovery/
+├── README.md                       # this file: pitch, quickstart, the file map + doc index
+├── ARCHITECTURE.md                 # how the software is built (the fence, data flow, seams, the sim)
+├── HARVEST-VALIDITY-AUDIT.md       # red/blue validity audit of the sim dataset
+├── ACT-EVAL-AUDIT.md               # red/blue audits of the ACT eval + the Option A decision
+├── pyproject.toml                  # package config; pythonpath=["src"], pytest config
+├── proposal/
+│   ├── PROPOSAL.tex                # THE source of truth for scope + method
+│   └── PROPOSAL.pdf                # compiled proposal (LaTeX build artifacts gitignored)
+├── src/
+│   ├── schema/                     # the CONTRACT: format-agnostic types, stdlib only (both tracks import this)
+│   │   ├── episode.py              # ConditionClass, Outcome, CompetenceTier, Label, Episode, RecordedEpisode
+│   │   └── streams.py              # Modality (the 7 streams), Sample, StreamSpec
+│   ├── harvest/                    # PART 1: data framework + ACT baseline (imports schema, NEVER recovery)
+│   │   ├── labels.py               # canonical label-name constants (shared producer <-> consumer)
+│   │   ├── sensors/
+│   │   │   ├── base.py             # SensorSource Protocol (the sensor seam)
+│   │   │   └── mock.py             # MockSource: deterministic synthetic source for tests
+│   │   ├── recorder/
+│   │   │   └── recorder.py         # record_episode: sensor-agnostic sampling loop + timestamp check
+│   │   ├── protocol/
+│   │   │   └── protocol.py         # EpisodeProtocol FSM for a real collection session (hardware/mock path)
+│   │   ├── control/                # backend-agnostic control layer (MuJoCo-free)
+│   │   │   ├── backend.py          # RobotBackend + SceneOracle + GraspBackend Protocols (the hardware seam)
+│   │   │   └── policy.py           # ManipulationPolicy Protocol + ScriptedGraspPolicy
+│   │   ├── sim/                    # the MuJoCo world + demo generator (MuJoCo lives ONLY here)
+│   │   │   ├── scene.py            # build the Gen3 + gripper + damaged-can MuJoCo model
+│   │   │   ├── world.py            # SimWorld: thin control/read surface (delegates to ik/sensing/_render)
+│   │   │   ├── ik.py               # damped-least-squares IK solvers (free functions)
+│   │   │   ├── sensing.py          # force-torque / tactile / render / sample reads (free functions)
+│   │   │   ├── _render.py          # the ONE process-global renderer, closed on model change (leak fix)
+│   │   │   ├── reorient.py         # demonstrate(): grasp -> reorient -> present -> slip (THE demo generator)
+│   │   │   └── episode.py          # record_sim_demo() + SimSource: run one demo, sample the 7 streams
+│   │   ├── io/                     # serialization (on-disk formats live ONLY here)
+│   │   │   ├── _serde.py           # episode <-> dict
+│   │   │   ├── flat_npz_adapter.py # per-episode .npz + jsonl streams (the shipped sim path)
+│   │   │   └── rosbag2_adapter.py  # rosbag2 read/write (the ROS2 / hardware boundary)
+│   │   ├── dataset/
+│   │   │   ├── splits.py           # by-can leak-free train/val/test (the can is the unit of independence)
+│   │   │   ├── card.py             # caveat-forward dataset card
+│   │   │   ├── export.py           # HuggingFace metadata rows
+│   │   │   ├── competence.py       # proxy competence-tier tagging from a held-out margin
+│   │   │   └── generate.py         # the grid driver (conditions x orientations x poses)
+│   │   ├── policy/
+│   │   │   └── trainer.py          # Trainer Protocol + StubTrainer (baseline floor) + LeRobotACTTrainer
+│   │   └── annotation/             # placeholder for hardware-phase labeling tools
+│   └── recovery/                   # PART 2: recovery-selection (imports schema, NEVER harvest); mostly stubs
+│       ├── competence/signals.py   # CompetenceSignals + CompetenceModel (the 4 tiers)          [stub]
+│       ├── metric/recovery_regret.py # RecoveryArm, ArmCost, CostWeights, recovery_regret         [stub]
+│       ├── arms/                   # the four recovery arms                                    [to build]
+│       ├── grid/                   # counterfactual reset-and-replay grid                      [to build]
+│       └── selector/               # the cost-aware selector                                   [to build]
+├── scripts/cluster/                # the AICR run playbook + scripts (data is cluster-only)
+│   ├── README.md                   # the cluster run playbook (order of operations)
+│   ├── 00_setup_env.sh             # one-time env: Blackwell torch cu128 + lerobot + mujoco
+│   ├── gen_dataset_parallel.py     # deterministic sharded episode generator (shard/assemble/local)
+│   ├── 10_materialize.slurm        # regenerate the 600 streams to /scratch (all 7 modalities)
+│   ├── 20_build_lerobot_dataset.py # build a LeRobotDataset from streams (--split train|heldout)
+│   ├── 30_train_act.slurm          # lerobot-train the ACT policy on a B200
+│   ├── 80_rigorous_eval.py         # held-out predicted-action L1 vs a no-move baseline (the valid eval)
+│   └── 81_eval_diagnostic.py       # per-condition + sanity diagnostic
+├── tests/                          # mirror src/, strict TDD, synthetic data only (run: MUJOCO_GL=cgl pytest)
+│   ├── schema/test_schema.py           # the schema types
+│   ├── harvest/test_mock_source.py     # MockSource
+│   ├── harvest/test_recorder.py        # the recorder sampling loop
+│   ├── harvest/test_protocol.py        # the EpisodeProtocol FSM
+│   ├── harvest/test_pipeline.py        # end-to-end mock pipeline (record -> io -> read)
+│   ├── harvest/test_io.py              # the io adapters round-trip
+│   ├── harvest/test_splits.py          # by-can leak-free splits
+│   ├── harvest/test_dataset.py         # dataset card + export
+│   ├── harvest/test_competence.py      # competence-tier tagging
+│   ├── harvest/test_generate.py        # the grid driver
+│   ├── harvest/test_policy.py          # the Trainer interface + StubTrainer
+│   ├── harvest/test_sim_world.py       # SimWorld physics/control/reads
+│   ├── harvest/test_sim_condition.py   # per-condition can geometry
+│   ├── harvest/test_sim_orientation.py # unknown-orientation grasp
+│   ├── harvest/test_sim_episode.py     # record_sim_demo + SimSource
+│   ├── harvest/test_reorient.py        # the demonstration generator
+│   └── recovery/test_recovery_stubs.py # the Part 2 NotImplementedError contract
+└── experiments/                    # committed eval result JSONs (the audit records)
 ```
 
-The fence (enforced by import direction): `recovery` imports `schema` only, never `harvest` internals. `harvest` never imports `recovery`. The on-disk format (rosbag2) is known only inside `harvest/io/`.
+The fence is enforced by import direction. `recovery` imports `schema` only, never `harvest`. `harvest`
+never imports `recovery`. MuJoCo lives only in `harvest/sim/`, and the on-disk formats only in
+`harvest/io/` (flat npz + jsonl for the sim path, rosbag2 for the ROS2/hardware boundary).
+`ARCHITECTURE.md` explains all of this in depth.
 
-## Method and plan
+## Documentation (the meta-doc standard list, kept current each milestone)
 
-Part 1 first, robot-free. Build the HARVEST framework against MuJoCo physics-sim episodes, recording all streams time-aligned into rosbag2 (via the pure-Python `rosbags` library, no ROS2 on macOS), with by-can leak-free splits and annotation. Train the ACT baseline on the sim dataset and run the tactile ablation as a pipeline smoke test (simulated tactile is synthetic, so the reported ablation result comes from the physical data). Then Part 2 on top. Build the competence model on the frozen ACT, inject scripted failures, run the four-arm counterfactual grid, and fire the make-or-break gate (does the per-failure oracle beat the best fixed move by >15% recovery-regret, and is that headroom learnable from the real ACT competence signals). A NO-GO still ships a benchmark + the recovery-regret metric. Real-robot collection and the reported tactile ablation follow once hardware is arranged.
+| Doc                         | What it is                                                               |
+| --------------------------- | ------------------------------------------------------------------------ |
+| `ARCHITECTURE.md`           | How the software is built (the fence, the data flow, the seams, the sim) |
+| `proposal/PROPOSAL.tex`     | Source of truth for scope and method                                     |
+| `HARVEST-VALIDITY-AUDIT.md` | Red/blue validity audit of the sim dataset                               |
+| `ACT-EVAL-AUDIT.md`         | Red/blue audits of the ACT eval, and the Option A decision               |
+| `scripts/cluster/README.md` | The AICR run playbook                                                    |
+
+Internal working docs (gitignored, not in the public repo, kept locally as part of the meta-doc
+standard): `PLAN.md` (live build plan), `CLAUDE.md` / `MEMORY.md` / `ANTIPATTERNS.md` (agentic project
+files), `HARVEST-DESIGN-REVIEW.md` (Part 0 sign-off), `VENUE-TIMELINE.md` (venues and dates).
 
 ## Hard constraints
 
-- Strict TDD, a failing test before any implementation (synthetic data only in tests).
+- Strict TDD, a failing test before implementation (synthetic data only in tests).
 - By-can leak-free splits. The can is the unit of statistical independence, not the episode.
-- Grasp-stability labels from simulator ground truth in sim, from an independent source (overhead-vision success or a human) on the real robot, never from the tactile stream.
-- The sim tactile ablation is a smoke test, never reported as evidence.
-- No robot commands without Lorena. No commits or pushes from Claude (`/Commit-Initiation` plans only). No emojis.
+- The sim tactile ablation is a smoke test, never reported as evidence. The reported ablation is hardware.
+- No robot commands without Lorena. No commits or pushes from Claude (`/Commit-Initiation` plans only).
+- No emojis.
 
 ## Hardware
 
-The framework is built robot-free so no time is lost while hardware access is arranged. Physical collection on the real Kinova is the primary deliverable once the arm is available. The target platform is a Kinova Gen3 + Robotiq 2F-85 gripper with TSF-85 tactile fingertips + a top-down overhead RGB-D camera (Azure Kinect) + the Gen3 wrist RGB-D module, ROS2 Humble (coordination contact and TSF-85 mounting PENDING, confirmed when Padir is back). Compute runs on the AICR cluster (Massachusetts AI Compute Resource) via `/Cluster-Compute` for ACT training and the recovery selector, with a lab GPU as the hardware-time fallback.
+Built robot-free so no time is lost while access is arranged. The target platform is a Kinova Gen3 +
+Robotiq 2F-85 with TSF-85 tactile fingertips, a top-down overhead RGB-D camera, and the Gen3 wrist RGB-D,
+on ROS2 Humble. Kinova POC is Drake Moore (coordinate via Teams). Compute runs on the AICR cluster via
+`/Cluster-Compute`.
