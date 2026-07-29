@@ -1,0 +1,34 @@
+{
+  "caveat": "DIRECTIONAL / MACHINERY ONLY -- not evidence. Injected failures + proxy tiers + a stylized outcome model. The binding make-or-break is hardware (GATE 4).",
+  "n_failures": 120,
+  "cost_weights": {
+    "time": 1.0,
+    "human_effort": 30.0,
+    "safety": 1000.0,
+    "unrecovered_penalty": 100.0
+  },
+  "human_budget": 0.3,
+  "oracle_mean_cost": 21.8,
+  "best_fixed_arm": "ask_human",
+  "best_fixed_mean_cost": 35.0,
+  "oracle_improvement_over_best_fixed": 0.3771,
+  "oracle_beats_best_fixed": true,
+  "fixed_arm_mean_cost": {
+    "retry": 488.0,
+    "rewind": 674.0,
+    "replan": 846.0,
+    "ask_human": 35.0
+  },
+  "fixed_arm_mean_regret": {
+    "retry": 466.2,
+    "rewind": 652.2,
+    "replan": 824.2,
+    "ask_human": 13.2
+  },
+  "selector": {
+    "lambda": 0.0,
+    "mean_cost": 21.8,
+    "mean_regret": 0.0,
+    "ask_human_fraction": 0.2
+  }
+}
