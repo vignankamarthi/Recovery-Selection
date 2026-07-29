@@ -17,6 +17,7 @@ import math
 from dataclasses import replace
 from typing import Iterator, Sequence
 
+from harvest.labels import GRASP_STABLE, LABEL_UP_COS, LABEL_VISIBLE, UPRIGHT_SUCCESS
 from harvest.sim.reorient import demonstrate, slip_severity
 from harvest.sim.scene import can_seed_from_id
 from harvest.sim.world import SimWorld
@@ -41,7 +42,7 @@ DEFAULT_MODALITIES: tuple[Modality, ...] = (
 LYING_QUAT = (math.cos(math.pi / 4), math.sin(math.pi / 4), 0.0, 0.0)
 
 
-def record_episode(
+def record_sim_demo(
     episode: Episode,
     can_pos: tuple[float, float, float] = (0.5, 0.0, 0.11),
     modalities: Sequence[Modality] = DEFAULT_MODALITIES,
@@ -83,10 +84,10 @@ def record_episode(
     # is tactile-derived. The task outcome requires all three stages to pass.
     grasp_stable = True
     labels = list(episode.labels) + [
-        Label("upright_success", bool(res.upright_success), LabelProvenance.SIMULATOR),
-        Label("grasp_stable", grasp_stable, LabelProvenance.SIMULATOR),
-        Label("label_visible", bool(res.label_visible), LabelProvenance.AUTO_VISION),
-        Label("label_up_cos", float(res.label_nz), LabelProvenance.AUTO_VISION),
+        Label(UPRIGHT_SUCCESS, bool(res.upright_success), LabelProvenance.SIMULATOR),
+        Label(GRASP_STABLE, grasp_stable, LabelProvenance.SIMULATOR),
+        Label(LABEL_VISIBLE, bool(res.label_visible), LabelProvenance.AUTO_VISION),
+        Label(LABEL_UP_COS, float(res.label_nz), LabelProvenance.AUTO_VISION),
     ]
     passed = bool(res.upright_success and grasp_stable and res.label_visible)
     stamped = replace(

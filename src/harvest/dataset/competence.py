@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from typing import Iterable, Optional
 
+from harvest.labels import LABEL_UP_COS, LABEL_VISIBLE
 from schema.episode import CompetenceTier, Episode
 
 # Margin bands on `label_up_cos` (the realized presentation margin; the success threshold is 0.92).
@@ -36,8 +37,8 @@ def _label(episode: Episode, name: str, default: Optional[object] = None) -> obj
 
 def competence_tier(episode: Episode) -> CompetenceTier:
     """The proxy tier for one episode, from its held-out realized margin (never its condition)."""
-    cos = float(_label(episode, "label_up_cos", 0.0))
-    visible = bool(_label(episode, "label_visible", False))
+    cos = float(_label(episode, LABEL_UP_COS, 0.0))
+    visible = bool(_label(episode, LABEL_VISIBLE, False))
     if cos >= _IN_REGION_MIN and visible:
         return CompetenceTier.IN_REGION          # faced up with room to spare and the camera saw it
     if cos >= _BOUNDARY_MIN:

@@ -12,14 +12,14 @@ from __future__ import annotations
 import random
 from typing import Sequence
 
-from harvest.sim.episode import DEFAULT_MODALITIES, record_episode
+from harvest.sim.episode import DEFAULT_MODALITIES, record_sim_demo
 from schema.episode import ConditionClass, Episode, RecordedEpisode
 from schema.streams import Modality
 
 # Reachable can workspace (metres) around the nominal grasp pose used in 1.6/1.7.
 _X_RANGE = (0.46, 0.54)
 _Y_RANGE = (-0.06, 0.06)
-# Cans spawn LYING (record_episode's default), so drop them from a small height above the table
+# Cans spawn LYING (record_sim_demo's default), so drop them from a small height above the table
 # and let them settle on their side to an unknown resting yaw. This matches the proven pipeline.
 _SPAWN_Z = 0.11
 
@@ -49,5 +49,5 @@ def generate_dataset(
             for p in range(poses_per_can):
                 pos = sample_can_pose(rng)
                 episode = Episode(f"{can_id}-p{p}", can_id, c)
-                recorded.append(record_episode(episode, can_pos=pos, modalities=modalities))
+                recorded.append(record_sim_demo(episode, can_pos=pos, modalities=modalities))
     return recorded

@@ -92,7 +92,8 @@ def run_episode(
                 episode, sources, n_samples, skew_tolerance_ns, verify_timestamps
             )
         elif proto.phase is Phase.VERIFY:
-            assert recorded is not None  # GRASP always precedes VERIFY
+            if recorded is None:  # GRASP always precedes VERIFY; guard the invariant explicitly
+                raise RuntimeError("VERIFY reached before GRASP recorded the episode")
             score = float(scorer(recorded))
             success = score >= threshold
             outcome = Outcome.SUCCESS if success else Outcome.FAILURE
@@ -102,7 +103,8 @@ def run_episode(
             ]
         proto.advance()
 
-    assert recorded is not None
+    if recorded is None:  # the FSM always passes through GRASP before DONE
+        raise RuntimeError("episode protocol finished without recording (GRASP never ran)")
     stamped = replace(
         recorded.episode,
         outcome=outcome,
