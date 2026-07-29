@@ -160,8 +160,6 @@ files), `HARVEST-DESIGN-REVIEW.md` (Part 0 sign-off), `VENUE-TIMELINE.md` (venue
 - Strict TDD, a failing test before implementation (synthetic data only in tests).
 - By-can leak-free splits. The can is the unit of statistical independence, not the episode.
 - The sim tactile ablation is a smoke test, never reported as evidence. The reported ablation is hardware.
-- No robot commands without Lorena. No commits or pushes from Claude (`/Commit-Initiation` plans only).
-- No emojis.
 
 ## Hardware
 
