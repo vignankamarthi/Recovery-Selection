@@ -4,10 +4,10 @@ import numpy as np
 import pytest
 
 mujoco = pytest.importorskip("mujoco")
-from harvest.control.backend import RobotBackend  # noqa: E402
+from harvest.control.backend import GraspBackend, RobotBackend, SceneOracle  # noqa: E402
 from harvest.control.policy import ScriptedGraspPolicy  # noqa: E402
 from harvest.sensors.base import SensorSource  # noqa: E402
-from harvest.sim.episode import SimSource, record_episode  # noqa: E402
+from harvest.sim.episode import SimSource, record_sim_demo  # noqa: E402
 from harvest.sim.world import SimWorld  # noqa: E402
 from schema.episode import (  # noqa: E402
     ConditionClass,
@@ -21,9 +21,14 @@ from schema.streams import Modality  # noqa: E402
 _FAST = (Modality.PROPRIOCEPTION, Modality.FORCE_TORQUE, Modality.TACTILE)
 
 
-def test_simworld_satisfies_the_robot_backend_interface():
-    # The extensible split: the sim is a RobotBackend, so a policy drives it backend-agnostically.
-    assert isinstance(SimWorld(), RobotBackend)
+def test_simworld_satisfies_the_backend_interfaces():
+    # The extensible split: the sim is a RobotBackend (control) AND a SceneOracle (scene truth), so
+    # it is a GraspBackend the scripted policy drives backend-agnostically. On hardware the two seams
+    # come from separate modules (a RosBackend + a perception stack).
+    w = SimWorld()
+    assert isinstance(w, RobotBackend)
+    assert isinstance(w, SceneOracle)
+    assert isinstance(w, GraspBackend)
 
 
 def test_scripted_grasp_policy_runs_on_the_backend_and_returns_success():
@@ -33,9 +38,9 @@ def test_scripted_grasp_policy_runs_on_the_backend_and_returns_success():
     assert ok is w.grasp_success()
 
 
-def test_record_episode_produces_labeled_recorded_episode_with_sim_ground_truth():
+def test_record_sim_demo_produces_labeled_recorded_episode_with_sim_ground_truth():
     ep = Episode("e1", "can1", ConditionClass.NOMINAL)
-    rec = record_episode(ep, modalities=_FAST)
+    rec = record_sim_demo(ep, modalities=_FAST)
 
     assert isinstance(rec, RecordedEpisode)
     assert set(rec.streams) == {m.value for m in _FAST}
@@ -48,12 +53,12 @@ def test_record_episode_produces_labeled_recorded_episode_with_sim_ground_truth(
     assert rec.episode.is_tactile_label_confounded() is False
 
 
-def test_record_episode_emits_the_three_graded_stage_labels():
+def test_record_sim_demo_emits_the_three_graded_stage_labels():
     # 1.7d: the lying-can pipeline is a 3-stage graded task. `upright_success` (right the lying
     # can) and `label_visible` (present the label to the overhead camera) are real sim signals;
     # `grasp_stable` is a SIMULATOR default (real on hardware). The outcome requires all three.
     ep = Episode("v1", "can-v", ConditionClass.NOMINAL)
-    rec = record_episode(ep, modalities=_FAST, record_every=999)
+    rec = record_sim_demo(ep, modalities=_FAST, record_every=999)
     labels = {l.name: l for l in rec.episode.labels}
     assert {"upright_success", "grasp_stable", "label_visible", "label_up_cos"} <= set(labels)
 
@@ -72,9 +77,9 @@ def test_record_episode_emits_the_three_graded_stage_labels():
     assert rec.episode.outcome is expected
 
 
-def test_record_episode_records_image_modality():
+def test_record_sim_demo_records_image_modality():
     ep = Episode("e2", "can2", ConditionClass.NOMINAL)
-    rec = record_episode(ep, modalities=(Modality.RGB_OVERHEAD,), record_every=30)
+    rec = record_sim_demo(ep, modalities=(Modality.RGB_OVERHEAD,), record_every=30)
     frames = rec.streams["rgb_overhead"]
     assert len(frames) > 0
     assert np.asarray(frames[0].data).ndim == 3

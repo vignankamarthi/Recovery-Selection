@@ -30,6 +30,8 @@ from typing import Callable, Optional
 import numpy as np
 import mujoco
 
+from harvest.control.policy import ScriptedGraspPolicy
+from harvest.sim._render import label_pixel_count
 from harvest.sim.world import SimWorld
 from schema.episode import ConditionClass
 
@@ -44,10 +46,6 @@ GOOD_PX = 200                    # overhead label pixels that count as CLEARLY s
 # gripper partly occludes) clears it, so baseline occlusion does not manufacture condition-free
 # failures. A can that SLIPS rolls its label off the top, coverage collapses, and it drops below.
 LABEL_VISIBLE_PX = 70
-# Exactly ONE live renderer, ever. Each episode builds a new SimWorld (a new MjModel), so caching a
-# renderer per model leaked an OpenGL framebuffer + context per episode and exhausted memory on a
-# long generation run. We keep a single renderer and close it the moment the model changes.
-_RENDERER: dict = {"model": None, "r": None}
 
 # Condition-correlated in-hand SLIP (the failure source). A damaged can slips in the grasp during
 # the reorient: the can rolls about its own long axis, so the label rolls off the top and the
@@ -70,12 +68,13 @@ _SLIP_BASE = {
 }
 
 
-def slip_severity(condition: ConditionClass, seed: int) -> float:
-    """Deterministic per-can slip severity in [0, 1]: a condition base plus a seeded jitter, so a
-    damaged can slips more than a nominal one but individual cans still vary."""
-    base = _SLIP_BASE.get(condition, 0.35)
-    jitter = ((int(seed) * 2654435761) % 1000) / 1000.0 * 0.36 - 0.18   # deterministic in [-0.18, 0.18]
-    return float(min(1.0, max(0.0, base + jitter)))
+def slip_severity(condition: ConditionClass, seed: int = 0) -> float:
+    """Slip severity in [0, 1] as a pure function of the VISIBLE condition (dent / bulge / rust are
+    visible in the overhead + wrist RGB). No per-can hidden jitter: the failure must be a function of
+    what the policy can OBSERVE or it cannot be learned. The old seed-hashed jitter made the slip an
+    unpredictable per-can constant, which guaranteed held-out prediction failure regardless of the
+    policy (see ACT-EVAL-AUDIT.md). `seed` is kept for call-site compatibility but is unused now."""
+    return float(min(1.0, max(0.0, _SLIP_BASE.get(condition, 0.35))))
 
 
 @dataclass
@@ -98,20 +97,13 @@ class ReorientResult:
 
 
 def _overhead_px(w: SimWorld) -> Optional[int]:
-    """Overhead label pixel count via segmentation, or None if a renderer is unavailable."""
+    """Overhead label pixel count via segmentation, or None if a renderer is unavailable. Uses the
+    single process-global renderer in `sim/_render.py` (shared with `world.render`)."""
     try:
-        if _RENDERER["model"] is not w.model:          # identity compare, never id() (it gets reused)
-            if _RENDERER["r"] is not None:
-                _RENDERER["r"].close()                 # free the previous GL context before replacing
-            _RENDERER["r"] = mujoco.Renderer(w.model, 200, 200)
-            _RENDERER["model"] = w.model
-        r = _RENDERER["r"]
-        r.update_scene(w.data, camera="overhead")
-        r.enable_segmentation_rendering()
-        seg = r.render()
-        r.disable_segmentation_rendering()
-        return int((seg[..., 0] == w._label_gid).sum())
-    except Exception:
+        return label_pixel_count(w.model, w.data, w._label_gid, "overhead", 200, 200)
+    except (RuntimeError, mujoco.FatalError):
+        # Only the genuine "renderer unavailable" case (no GL context / offscreen framebuffer
+        # creation failed) returns None. A real bug (bad geom id, shape error) is NOT swallowed.
         return None
 
 
@@ -159,28 +151,23 @@ class Weld:
 
 def _grasp_head(w: SimWorld, on_step: OnStep = None) -> None:
     """Approach the lying can's head (not its middle), close, and settle. The caller then welds;
-    the physical lift need not succeed, the sim cannot hold this contact through a reorient anyway."""
-    can = w.can_position()
-    axis = w.can_long_axis()
-    axis = axis / np.linalg.norm(axis)
-    end = can + 0.035 * axis                              # the head, not the middle
-    wrist = w.aligned_wrist(np.arctan2(axis[1], axis[0]) + np.pi / 2)
-    w.set_gripper(0.0)
-    w.move_pinch_to(end + [0, 0, 0.12], wrist=wrist, on_step=on_step)
-    w.move_pinch_to(end, wrist=wrist, on_step=on_step)
-    w.set_gripper(1.0)
-    for _ in range(30):
-        w.step(5)
-        if on_step is not None:
-            on_step()
+    the physical lift need not succeed, the sim cannot hold this contact through a reorient anyway.
+
+    Delegates to the backend-agnostic `ScriptedGraspPolicy` (head-offset grasp, no lift, 30-step
+    settle), so the open->approach->descend->close->settle sequence lives in one place."""
+    ScriptedGraspPolicy(settle=30, head_offset_m=0.035, lift=False).run(w, on_step=on_step)
 
 
 def _search_present(w: SimWorld, offset: np.ndarray):
-    """On the CURRENT (scratch) data (can freshly grasped, lying), search the presentation family
-    DIRECTLY for the horizontal-label-up pose the overhead camera sees best, with no upright
-    waypoint. The label sits at a fixed spot in the hand, so "label-up" is a whole family of
-    wrist rolls; we sweep it and keep the best-seen reachable member. Returns (winning full-state
-    snapshot, label_nz, overhead_px) or (None, -1.0, None)."""
+    """On the CURRENT (scratch) data (can freshly grasped, lying), find the horizontal-label-up pose
+    the overhead camera sees best. The label sits at a fixed spot in the hand, so "label-up" is a
+    family of headings whose REACHABLE member differs per can (a fixed heading only reached ~2/10),
+    hence a sweep. The sweep is DETERMINISTIC (no RNG), so the winner is a deterministic function of
+    the grasp state (itself a function of the observed spawn pose), which is what makes the demo
+    learnable. It accepts the first clearly-seen upright pose (cheap, and one segmentation render per
+    tried heading is expensive, so an early accept keeps generation fast) and otherwise keeps the
+    best-seen. The winning snapshot's continuous joints are wrapped so the recorded action stays
+    bounded. Returns (winning full-state snapshot, label_nz, overhead_px) or (None, -1, None)."""
     hover = np.array([INSPECT_XY[0], INSPECT_XY[1], HOVER_Z])
     w.move_pinch_pose(hover, w.pinch_rotation(), max_steps=20)
     Rp0 = w.pinch_rotation()
@@ -208,13 +195,17 @@ def _search_present(w: SimWorld, offset: np.ndarray):
         score = float(px) if px is not None else nz
         if score > best_score:
             best_score, best_snap, best_nz, best_px = score, w.snapshot(), nz, px
-        if px is not None and px >= GOOD_PX:
+        if px is not None and px >= GOOD_PX:                # accept the first clearly-seen pose (deterministic + cheap)
             break
+    if best_snap is not None:
+        w.restore(best_snap)
+        w.wrap_continuous_joints()                          # bound the recorded action (fix 3)
+        best_snap = w.snapshot()
     return best_snap, best_nz, best_px
 
 
 def _plan(w: SimWorld, offset: np.ndarray):
-    """Search the presentation family on a HIDDEN scratch copy (viewer/recorder untouched).
+    """Run the deterministic presentation search on a HIDDEN scratch copy (viewer/recorder untouched).
     Returns (present_snap, nz, px) or None. The real sim is left exactly as it was."""
     real = w.data
     scratch = mujoco.MjData(w.model)

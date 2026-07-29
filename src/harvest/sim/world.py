@@ -4,6 +4,10 @@ Wraps the composed Gen3 + Robotiq 2F-85 + can scene with a clean read/control su
 step the physics, command the arm and gripper, read proprioception and the can pose,
 render the overhead and wrist cameras (RGB or depth), and read grasp-success ground
 truth. This is the source of physically-grounded episodes for the SimSource (1.6d).
+
+SimWorld is a thin surface: the IK solvers live in `sim/ik.py`, the sensing reads (force-torque,
+tactile, render, sample) in `sim/sensing.py`, and the shared renderer in `sim/_render.py`. The
+methods here delegate to them, keeping public signatures stable for both backends.
 """
 
 from __future__ import annotations
@@ -16,9 +20,13 @@ import platform
 if platform.system() == "Darwin":
     os.environ.setdefault("MUJOCO_GL", "cgl")
 
+from typing import Callable, Optional, Sequence
+
 import mujoco
 import numpy as np
 
+from harvest.sim import ik, sensing
+from harvest.sim._render import label_pixel_count
 from harvest.sim.scene import CAN_HALF_HEIGHT, CAN_RADIUS, build_scene, can_label_yaw
 from schema.episode import ConditionClass
 from schema.streams import Modality, Sample
@@ -32,13 +40,6 @@ LIFT_THRESHOLD_M = 0.10
 # Overhead label pixels a well-presented label shows at the narrow-FOV inspection framing,
 # the normalizer for the visibility score (measured: a fully-turned-up label covers ~220 px).
 _OVERHEAD_LABEL_REF_PX = 220.0
-
-# ONE process-global render context, closed when the model or size changes. A `mujoco.Renderer`
-# holds a GL framebuffer + context; a new SimWorld per episode meant a new renderer per episode,
-# and Python GC does not free the GL context, so it leaked one per episode and exhausted memory on
-# a long generation run. Keyed on model identity so each episode reuses (then replaces) the single
-# live renderer. (Same fix pattern as `_overhead_px` in `sim/reorient.py`.)
-_RENDER: dict = {"model": None, "hw": None, "r": None}
 
 
 class SimWorld:
@@ -106,7 +107,7 @@ class SimWorld:
         return int(round(self.data.time * 1e9))
 
     # --- control ---
-    def set_arm(self, q) -> None:
+    def set_arm(self, q: "np.ndarray | Sequence[float]") -> None:
         self.data.ctrl[:7] = np.asarray(q, dtype=float)[:7]
 
     def set_gripper(self, closed_frac: float) -> None:
@@ -129,65 +130,37 @@ class SimWorld:
             a += np.pi
         return float(np.clip(a, lo, hi))
 
-    def move_pinch_to(self, target, wrist=None, max_steps: int = 150, tol: float = 0.008,
-                      damping: float = 0.1, gain: float = 0.6, on_step=None) -> None:
-        """Damped-least-squares IK driving the gripper_pinch site to `target` by stepping.
+    def wrap_continuous_joints(self) -> None:
+        """Wrap each unlimited (continuous) arm joint into [-pi, pi]. Iterative IK can wind a
+        continuous joint through many turns (recorded proprioception ran out to +/-65 rad), which
+        makes the action a per-can idiosyncratic winding number instead of a bounded, learnable pose.
+        Wrapping to the principal range is physically equivalent for a continuous joint (the pose is
+        identical) and keeps the recorded action bounded so a policy can predict it."""
+        for j in range(7):
+            if not bool(self.model.jnt_limited[j]):
+                adr = int(self.model.jnt_qposadr[j])
+                self.data.qpos[adr] = (self.data.qpos[adr] + np.pi) % (2 * np.pi) - np.pi
+        mujoco.mj_forward(self.model, self.data)
 
-        With `wrist=None` all 7 joints solve for position. With a `wrist` angle, joint 7
-        (wrist roll) is held to aim the finger-closing axis while joints 1-6 solve for
-        position, so the fingers aim without moving the grasp point. The IK lives here in the
-        backend, so a manipulation policy stays MuJoCo-free and drives any backend that
-        provides this method.
-        """
-        jacp = np.zeros((3, self.model.nv))
-        jacr = np.zeros((3, self.model.nv))
-        target = np.asarray(target, dtype=float)
-        ndof = 6 if wrist is not None else 7
-        for _ in range(int(max_steps)):
-            if wrist is not None:
-                self.data.ctrl[6] = wrist
-            err = target - self.data.site_xpos[self._pinch_sid]
-            if np.linalg.norm(err) < tol:
-                break
-            mujoco.mj_jacSite(self.model, self.data, jacp, jacr, self._pinch_sid)
-            j = jacp[:, :ndof]
-            dq = j.T @ np.linalg.solve(j @ j.T + damping**2 * np.eye(3), err)
-            q = self.data.qpos[:7].copy()
-            q[:ndof] += gain * dq
-            if wrist is not None:
-                q[6] = wrist
-            self.set_arm(q)
-            self.step(5)
-            if on_step is not None:
-                on_step()
+    def move_pinch_to(self, target: "np.ndarray | Sequence[float]", wrist: Optional[float] = None,
+                      max_steps: int = 150, tol: float = 0.008, damping: float = 0.1,
+                      gain: float = 0.6, on_step: Optional[Callable[[], None]] = None) -> None:
+        """Damped-least-squares position IK driving the gripper_pinch site to `target`. A thin
+        delegate to `harvest.sim.ik.move_pinch_to` (the IK math lives there so the world file stays
+        a small control + read surface, and a manipulation policy stays MuJoCo-free)."""
+        ik.move_pinch_to(self, target, wrist, max_steps, tol, damping, gain, on_step)
 
     def pinch_rotation(self) -> np.ndarray:
         """World rotation matrix (3x3) of the gripper pinch frame."""
         return self.data.site_xmat[self._pinch_sid].reshape(3, 3).copy()
 
-    def move_pinch_pose(self, target_pos, target_rot, max_steps: int = 140, damping: float = 0.15,
-                        pos_gain: float = 0.5, rot_gain: float = 0.15, on_step=None) -> None:
+    def move_pinch_pose(self, target_pos: "np.ndarray | Sequence[float]", target_rot: np.ndarray,
+                        max_steps: int = 140, damping: float = 0.15, pos_gain: float = 0.5,
+                        rot_gain: float = 0.15, on_step: Optional[Callable[[], None]] = None) -> None:
         """6-DOF damped-least-squares IK driving the pinch site to a target position AND
-        orientation. Used to reorient a grasped can to present its label. Kept gentle (low
-        rotation gain) so the grasp is not shocked loose. Lives in the backend so the policy
-        stays MuJoCo-free."""
-        jacp = np.zeros((3, self.model.nv))
-        jacr = np.zeros((3, self.model.nv))
-        tpos = np.asarray(target_pos, dtype=float)
-        rt = np.asarray(target_rot, dtype=float)
-        for _ in range(int(max_steps)):
-            pe = tpos - self.data.site_xpos[self._pinch_sid]
-            rc = self.data.site_xmat[self._pinch_sid].reshape(3, 3)
-            re = 0.5 * (np.cross(rc[:, 0], rt[:, 0]) + np.cross(rc[:, 1], rt[:, 1])
-                        + np.cross(rc[:, 2], rt[:, 2]))
-            mujoco.mj_jacSite(self.model, self.data, jacp, jacr, self._pinch_sid)
-            jac = np.vstack([jacp[:, :7], jacr[:, :7]])
-            e = np.concatenate([pos_gain * pe, rot_gain * re])
-            dq = jac.T @ np.linalg.solve(jac @ jac.T + damping**2 * np.eye(6), e)
-            self.set_arm(self.data.qpos[:7] + dq)
-            self.step(5)
-            if on_step is not None:
-                on_step()
+        orientation (to reorient a grasped can to present its label). A thin delegate to
+        `harvest.sim.ik.move_pinch_pose`."""
+        ik.move_pinch_pose(self, target_pos, target_rot, max_steps, damping, pos_gain, rot_gain, on_step)
 
     def overhead_label_visibility(self, height: int = 200, width: int = 200) -> float:
         """Label-visibility ground truth in [0, 1] from the overhead camera.
@@ -195,18 +168,22 @@ class SimWorld:
         The exposed nutrition-label coverage (segmentation, a vision read, never tactile).
         0 means the label is not exposed to the camera, 1 a well-presented label. This is the
         overhead-RGB label-visibility signal the pick-and-reorient task is scored on (F7, the
-        vision channel is independent of the grasp-stability label)."""
-        ren = mujoco.Renderer(self.model, height, width)
-        ren.update_scene(self.data, camera="overhead")
-        ren.enable_segmentation_rendering()
-        seg = ren.render()
-        ren.disable_segmentation_rendering()
-        label_px = int((seg[..., 0] == self._label_gid).sum())
+        vision channel is independent of the grasp-stability label). Uses the single process-global
+        renderer in `sim/_render.py`."""
+        label_px = label_pixel_count(self.model, self.data, self._label_gid, "overhead", height, width)
         return min(1.0, label_px / _OVERHEAD_LABEL_REF_PX)
 
     # --- reads (ground truth) ---
     def proprioception(self) -> np.ndarray:
-        return self.data.qpos[:7].copy()
+        """The 7 arm joint angles, the recorded action space. Continuous joints are reported WRAPPED
+        into [-pi, pi] (the standard convention) so the recorded action stays bounded and learnable
+        even if the IK wound a joint through several turns on a hard reach. The pose is physically
+        identical, and control reads raw `qpos` directly, so only the recorded stream is affected."""
+        q = self.data.qpos[:7].copy()
+        for j in range(7):
+            if not bool(self.model.jnt_limited[j]):
+                q[j] = (q[j] + np.pi) % (2 * np.pi) - np.pi
+        return q
 
     def can_position(self) -> np.ndarray:
         return self.data.xpos[self._can_bid].copy()
@@ -243,73 +220,18 @@ class SimWorld:
         return bool(self.can_position()[2] - self._can_rest_z >= LIFT_THRESHOLD_M)
 
     def force_torque(self) -> np.ndarray:
-        """Wrist wrench (Fx,Fy,Fz,Tx,Ty,Tz), derived from the arm joint torques via the
-        wrist Jacobian. This is the joint-torque-derived F/T of correction F3, the same
-        estimate the real Gen3 provides by default without the optional 6-axis add-on."""
-        jacp = np.zeros((3, self.model.nv))
-        jacr = np.zeros((3, self.model.nv))
-        mujoco.mj_jacBody(self.model, self.data, jacp, jacr, self._wrist_bid)
-        jac_arm = np.vstack([jacp, jacr])[:, :7]  # 6 x 7 (arm DOFs)
-        # Subtract the gravity + Coriolis bias so the wrench carries the CONTACT load,
-        # not the arm holding its own weight (validity fix C5). At a settled no-contact
-        # hold the actuators just cancel the bias, so this reads ~0.
-        tau = self.data.qfrc_actuator[:7] - self.data.qfrc_bias[:7]
-        return (np.linalg.pinv(jac_arm.T) @ tau).copy()
+        """Wrist wrench (Fx,Fy,Fz,Tx,Ty,Tz) from the arm joint torques (see harvest.sim.sensing)."""
+        return sensing.force_torque(self)
 
     def tactile(self) -> np.ndarray:
-        """A (4x7) tactile pressure-map PROXY built from finger-pad contacts.
-
-        Each pad contact's normal force is binned into a cell by its height on the can
-        (row) and which pad it is (left -> columns 0-2, right -> columns 4-6; column 3 is
-        the inter-finger gap), with a small lateral spread. This yields a spatially varying
-        map rather than one value per pad. A stand-in for the real 28-taxel TSF-85 (whose
-        taxel layout differs), replaced on the real robot in Phase 3 (validity fix C4)."""
-        m = np.zeros((4, 7), dtype=float)
-        buf = np.zeros(6)
-        span = 2.0 * CAN_HALF_HEIGHT
-        for i in range(self.data.ncon):
-            c = self.data.contact[i]
-            pair = {c.geom1, c.geom2}
-            if pair & self._left_pad_geoms:
-                base = 1
-            elif pair & self._right_pad_geoms:
-                base = 5
-            else:
-                continue
-            mujoco.mj_contactForce(self.model, self.data, i, buf)
-            f = abs(float(buf[0]))
-            row = int(np.clip((c.pos[2] - self._can_rest_z + CAN_HALF_HEIGHT) / span * 4.0, 0, 3))
-            m[row, base] += f
-            m[row, base - 1] += 0.5 * f
-            m[row, base + 1] += 0.5 * f
-        return m
+        """A (4x7) tactile pressure-map PROXY from finger-pad contacts (see harvest.sim.sensing)."""
+        return sensing.tactile(self)
 
     def sample(self, modality: Modality, timestamp_ns: int) -> Sample:
-        """Read one modality from the current sim state as a schema Sample."""
-        readers = {
-            Modality.PROPRIOCEPTION: lambda: self.proprioception(),
-            Modality.FORCE_TORQUE: lambda: self.force_torque(),
-            Modality.TACTILE: lambda: self.tactile(),
-            Modality.RGB_OVERHEAD: lambda: self.render("overhead"),
-            Modality.DEPTH_OVERHEAD: lambda: self.render("overhead", depth=True),
-            Modality.RGB_WRIST: lambda: self.render("wrist"),
-            Modality.DEPTH_WRIST: lambda: self.render("wrist", depth=True),
-        }
-        if modality not in readers:
-            raise ValueError(f"sim has no reader for modality {modality}")
-        return Sample(modality=modality, timestamp_ns=timestamp_ns, data=readers[modality](), notes="sim")
+        """Read one modality from the current sim state as a schema Sample (see harvest.sim.sensing)."""
+        return sensing.sample(self, modality, timestamp_ns)
 
-    def render(self, camera: str = "overhead", depth: bool = False, height: int = 96, width: int = 96) -> np.ndarray:
-        if _RENDER["model"] is not self.model or _RENDER["hw"] != (height, width):
-            if _RENDER["r"] is not None:
-                _RENDER["r"].close()                 # free the previous GL context before replacing
-            _RENDER["r"] = mujoco.Renderer(self.model, height, width)
-            _RENDER["model"], _RENDER["hw"] = self.model, (height, width)
-        r = _RENDER["r"]
-        r.update_scene(self.data, camera=camera)
-        if depth:
-            r.enable_depth_rendering()
-            img = r.render().copy()
-            r.disable_depth_rendering()
-            return img
-        return r.render().copy()
+    def render(self, camera: str = "overhead", depth: bool = False,
+               height: int = 96, width: int = 96) -> np.ndarray:
+        """One RGB or depth camera frame (see harvest.sim.sensing)."""
+        return sensing.render(self, camera, depth, height, width)
