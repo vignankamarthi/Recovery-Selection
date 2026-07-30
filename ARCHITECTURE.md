@@ -9,7 +9,7 @@ venues, the contribution) read `README.md`. For the live plan read `PLAN.md`.
 ## 1. The one idea to hold onto
 
 Everything is organized around one rule. **Failures are the product, not the noise.** Part 1 (HARVEST)
-collects a dataset and trains a policy that *deliberately* fails on damaged cans. Part 2
+collects a dataset and trains a policy that _deliberately_ fails on damaged cans. Part 2
 (recovery-selection) consumes those failures and learns which recovery to run. So the codebase is two
 tracks that share exactly one thing, a format-agnostic description of an episode. That shared thing is
 the schema, and keeping the two tracks from reaching into each other is "the fence."
@@ -86,20 +86,24 @@ The whole build is robot-free today and moves to a real Kinova later without rew
 Each external dependency sits behind a small Protocol, with a sim implementation now and a hardware
 implementation to come. These are the seams to know:
 
-| Seam (Protocol) | Where | Sim implementation | Hardware implementation (later) |
-|---|---|---|---|
-| `SensorSource` | `sensors/base.py` | `MockSource`, and `SimSource` in `sim/episode.py` | `RosSource` reading real sensor topics |
-| `RobotBackend` + `SceneOracle` | `control/backend.py` | `SimWorld` (satisfies both) | a `RosBackend` |
-| `ManipulationPolicy` | `control/policy.py` | `ScriptedGraspPolicy` | teleop / a learned policy |
-| `Trainer` | `policy/trainer.py` | `StubTrainer` (a baseline floor) | `LeRobotACTTrainer` (real ACT, on the cluster) |
-| on-disk format | `io/` | `flat_npz_adapter` (streams), `_serde` (episodes) | `rosbag2_adapter` (the ROS2 boundary) |
+| Seam (Protocol)                | Where                | Sim implementation                                | Hardware implementation (later)                |
+| ------------------------------ | -------------------- | ------------------------------------------------- | ---------------------------------------------- |
+| `SensorSource`                 | `sensors/base.py`    | `MockSource`, and `SimSource` in `sim/episode.py` | `RosSource` reading real sensor topics         |
+| `RobotBackend` + `SceneOracle` | `control/backend.py` | `SimWorld` (satisfies both)                       | a `RosBackend`                                 |
+| `ManipulationPolicy`           | `control/policy.py`  | `ScriptedGraspPolicy`                             | teleop / a learned policy                      |
+| `Trainer`                      | `policy/trainer.py`  | `StubTrainer` (a baseline floor)                  | `LeRobotACTTrainer` (real ACT, on the cluster) |
+| on-disk format                 | `io/`                | `flat_npz_adapter` (streams), `_serde` (episodes) | `rosbag2_adapter` (the ROS2 boundary)          |
 
 Note the one refactor that matters most for hardware. `control/backend.py` splits the old single
 interface into **`RobotBackend`** (generic robot control and proprioception, reset/step/set_gripper/
 move_pinch_to/move_pinch_pose) and **`SceneOracle`** (task ground truth the sim can answer but a real
 robot cannot, can pose, upright check, grasp success, label visibility). `SimWorld` implements both. A
 real `RosBackend` implements only `RobotBackend`, and the "oracle" answers come from real perception
-instead. `GraspBackend` is just the composition of the two that the scripted grasp needs.
+instead. `GraspBackend` is just the composition of the two that the scripted grasp needs. One of those
+real-perception answers is already built ahead of hardware: `harvest/vision/label_visibility.py` reads
+label-visibility from an overhead RGB frame (numpy only), the real-camera equivalent of the sim's
+segmentation-based label read, so it drops straight into a `RosBackend`'s `SceneOracle` when the camera
+is up.
 
 ## 5. Module by module
 
@@ -143,13 +147,17 @@ Harvest-Recovery/
 │   │   ├── dataset/competence.py   # proxy competence-tier tagging from a held-out margin
 │   │   ├── dataset/generate.py     # the grid driver (conditions x orientations x poses)
 │   │   ├── policy/trainer.py       # Trainer Protocol + StubTrainer (baseline floor) + LeRobotACTTrainer
+│   │   ├── vision/label_visibility.py # overhead label-visibility read (numpy-only; the SceneOracle's real-camera label read)
 │   │   └── annotation/             # placeholder for hardware-phase labeling tools
-│   └── recovery/                   # PART 2: recovery-selection (imports schema, NEVER harvest); mostly stubs
-│       ├── competence/signals.py   # CompetenceSignals + CompetenceModel (the 4 tiers)          [stub]
-│       ├── metric/recovery_regret.py # RecoveryArm, ArmCost, CostWeights, recovery_regret         [stub]
-│       ├── arms/                   # the four recovery arms                                    [to build]
-│       ├── grid/                   # counterfactual reset-and-replay grid                      [to build]
-│       └── selector/               # the cost-aware selector                                   [to build]
+│   └── recovery/                   # PART 2: recovery-selection (imports schema, NEVER harvest);
+│       ├── policy/base_policy.py   # BasePolicy Protocol + StubBasePolicy + FrozenACTPolicy (ACT stays frozen)
+│       ├── competence/signals.py   # the 4 competence tiers + safe-set floor (Proxy/ACT competence models)
+│       ├── failures/injection.py   # FailureMode catalog (5 kinds) + failure generators
+│       ├── backend.py              # RecoveryBackend Protocol (the reset-and-replay seam)
+│       ├── arms/                   # the four recovery arms (retry, rewind, replan, ask-human)
+│       ├── grid/counterfactual.py  # counterfactual reset-and-replay grid + per-failure oracle
+│       ├── metric/recovery_regret.py # ArmCost, CostWeights, recovery_regret + default weights
+│       └── selector/selector.py    # cost-sensitive selector (Lagrangian human-budget)
 ├── scripts/cluster/                # the AICR run playbook + scripts (data is cluster-only)
 │   ├── README.md                   # the cluster run playbook (order of operations)
 │   ├── 00_setup_env.sh             # one-time env: Blackwell torch cu128 + lerobot + mujoco
@@ -176,16 +184,20 @@ Harvest-Recovery/
 │   ├── harvest/test_sim_orientation.py # unknown-orientation grasp
 │   ├── harvest/test_sim_episode.py     # record_sim_demo + SimSource
 │   ├── harvest/test_reorient.py        # the demonstration generator
-│   └── recovery/test_recovery_stubs.py # the Part 2 NotImplementedError contract
+│   ├── harvest/test_label_visibility.py # the overhead label-visibility read (synthetic images + ROI)
+│   └── recovery/                        # Part 2 suite: base_policy, competence, injection, backend, arms,
+│                                        #   grid, metric, selector, smoke (+ the fenced sim_harness)
 └── experiments/                    # committed eval result JSONs (the audit records)
 ```
 
 **`src/schema/`** (the contract)
+
 - `episode.py` -- `ConditionClass`, `Outcome`, `CompetenceTier`, `LabelProvenance`, `Label`, `Episode`,
   `RecordedEpisode`. Stdlib only.
 - `streams.py` -- `Modality` (the seven streams), `Sample`, `StreamSpec`.
 
 **`src/harvest/`** (Part 1)
+
 - `labels.py` -- canonical label-name constants (`UPRIGHT_SUCCESS`, `GRASP_STABLE`, `LABEL_VISIBLE`,
   `LABEL_UP_COS`), imported by both the producer (`sim/episode.py`) and the consumer
   (`dataset/competence.py`) so a rename cannot silently break tier tagging.
@@ -207,12 +219,23 @@ Harvest-Recovery/
   tagging from a held-out margin), `generate.py` (the grid driver).
 - `policy/` -- `trainer.py`, the torch-free `Trainer` Protocol + `StubTrainer` (condition-majority
   baseline floor) + `LeRobotACTTrainer` (real ACT, lazily imports LeRobot, runs on the cluster).
+- `vision/` -- `label_visibility.py`, the overhead label-visibility read (numpy only). Reads label pixel
+  coverage + a visible/legible flag (Padir's 70px bar) from an RGB frame, with a swappable `LabelSpec`
+  (RGB-distance or HSV) and an optional ROI. The real-camera equivalent of the sim's segmentation label
+  read, so it fills the `SceneOracle`'s label answer on hardware.
 - `annotation/` -- placeholder for the hardware-phase labeling tools.
 
-**`src/recovery/`** (Part 2, mostly stubs until Part 1 is done)
-- `competence/signals.py` -- `CompetenceSignals`, `CompetenceModel` (the four tiers from latent density +
-  ensemble disagreement). `metric/recovery_regret.py` -- `RecoveryArm`, `ArmCost`, `CostWeights`,
-  `recovery_regret`. `arms/`, `grid/`, `selector/` -- to be built.
+**`src/recovery/`** (Part 2, built in Milestone 2)
+
+- `policy/base_policy.py` -- `BasePolicy` Protocol + `StubBasePolicy` (torch-free) + `FrozenACTPolicy`
+  (lazy LeRobot, frozen). `competence/signals.py` -- the four tiers from latent density + ensemble
+  disagreement, with the control-invariant safe set as a hard floor (`ProxyCompetenceModel` /
+  `ACTCompetenceModel`). `failures/injection.py` -- the `FailureMode` catalog (5 kinds) + generators.
+- `backend.py` -- the `RecoveryBackend` Protocol (the reset-and-replay seam). `arms/` -- the four arms
+  (retry, rewind, replan, ask-human) as backend-agnostic behaviors. `grid/counterfactual.py` -- the
+  counterfactual reset-and-replay grid + per-failure oracle. `metric/recovery_regret.py` -- `ArmCost`,
+  `CostWeights`, `recovery_regret` + default weights. `selector/selector.py` -- the cost-sensitive
+  selector under a Lagrangian human-budget.
 
 ## 6. The simulation, in depth (the subtle part)
 
@@ -251,9 +274,10 @@ results are hardware, and the sim is a smoke test.
 ## 7. Testing and the dev tools
 
 - Tests live in `tests/`, mirror `src/`, and run on synthetic data only. Strict TDD, a failing test
-  before implementation. Run them with `MUJOCO_GL=cgl .venv/bin/python -m pytest` (90 passing).
-- `tests/recovery/` holds stub tests asserting the Part 2 `NotImplementedError` contract, so Part 2
-  starts test-covered.
+  before implementation. Run them with `MUJOCO_GL=cgl .venv/bin/python -m pytest` (151 passing).
+- `tests/recovery/` holds the Part 2 suite (base policy, competence, injection, backend, arms, grid,
+  metric, selector, and an end-to-end smoke test), plus `sim_harness.py`, the one fence-crossing adapter
+  that drives a real `SimWorld` through the recovery grid (kept in `tests/`, never under `src/recovery/`).
 - Gitignored dev tools at the repo root visualize the sim (never committed): `sim_present.py` (the current
   presentation), `sim_viewer.py` (a live viewer that reloads `sim_present.py` each loop), `sim_viz.py`
   (a headless filmstrip recorder), `watch_sim.sh` (the launcher). The rule (ANTIPATTERNS AP-11): every
@@ -263,15 +287,15 @@ results are hardware, and the sim is a smoke test.
 
 The canonical documents, kept current after each milestone:
 
-| Doc | What it is |
-|---|---|
-| `README.md` | Research framing, the two-track pitch, quickstart, this index |
-| `ARCHITECTURE.md` | This file, how the software is built |
-| `PLAN.md` | The live build plan (milestones, steps, gates) |
+| Doc                                           | What it is                                                      |
+| --------------------------------------------- | --------------------------------------------------------------- |
+| `README.md`                                   | Research framing, the two-track pitch, quickstart, this index   |
+| `ARCHITECTURE.md`                             | This file, how the software is built                            |
+| `PLAN.md`                                     | The live build plan (milestones, steps, gates)                  |
 | `CLAUDE.md` / `MEMORY.md` / `ANTIPATTERNS.md` | Agentic project files (identity / live state / hard-stop rules) |
-| `proposal/PROPOSAL.tex` | The source of truth for scope and method |
-| `HARVEST-DESIGN-REVIEW.md` | Part 0 sign-off record (flags F1-F7) |
-| `HARVEST-VALIDITY-AUDIT.md` | Red/blue validity audit of the sim dataset |
-| `ACT-EVAL-AUDIT.md` | Red/blue audits of the ACT eval, and the Option A decision |
-| `VENUE-TIMELINE.md` | Target venues and dates |
-| `scripts/cluster/README.md` | The AICR run playbook |
+| `proposal/PROPOSAL.tex`                       | The source of truth for scope and method                        |
+| `HARVEST-DESIGN-REVIEW.md`                    | Part 0 sign-off record (flags F1-F7)                            |
+| `HARVEST-VALIDITY-AUDIT.md`                   | Red/blue validity audit of the sim dataset                      |
+| `ACT-EVAL-AUDIT.md`                           | Red/blue audits of the ACT eval, and the Option A decision      |
+| `VENUE-TIMELINE.md`                           | Target venues and dates                                         |
+| `scripts/cluster/README.md`                   | The AICR run playbook                                           |

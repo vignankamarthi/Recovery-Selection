@@ -27,12 +27,14 @@ both the tactile signal Part 1 measures and the failure substrate Part 2 recover
 
 ## Status
 
-Software build phase, sim-first. Milestone 1 (the HARVEST framework + the ACT baseline pipeline) is
-functionally complete. The simulation is a **smoke test**, it validates the recording and training
+Software build phase complete, sim-first. Milestone 1 (the HARVEST framework + the ACT baseline pipeline)
+and Milestone 2 (the full recovery layer + a sim dry-run of the make-or-break) are built and tested, and
+the overhead label-visibility read is done, so all robot-free software is finished and the project is now
+on the hardware on-ramp. The simulation is a **smoke test**, it validates the recording and training
 pipeline but its ACT numbers are not trusted as evidence (see `ACT-EVAL-AUDIT.md` for why, the scripted
-demo's target is not a learnable function of the observation). The reported ACT baseline and tactile
-ablation come from the **hardware** dataset, where demonstrations are human teleop. Next is the hardware
-on-ramp. `proposal/PROPOSAL.tex` is the source of truth for scope and method.
+demo's target is not a learnable function of the observation). The reported ACT baseline, tactile
+ablation, and the binding recovery make-or-break all come from the **hardware** dataset, where
+demonstrations are human teleop. `proposal/PROPOSAL.tex` is the source of truth for scope and method.
 
 ## Quickstart
 
@@ -99,13 +101,18 @@ Harvest-Recovery/
 │   │   │   └── generate.py         # the grid driver (conditions x orientations x poses)
 │   │   ├── policy/
 │   │   │   └── trainer.py          # Trainer Protocol + StubTrainer (baseline floor) + LeRobotACTTrainer
+│   │   ├── vision/
+│   │   │   └── label_visibility.py # overhead label-visibility read (numpy-only; the SceneOracle's real-camera label read)
 │   │   └── annotation/             # placeholder for hardware-phase labeling tools
-│   └── recovery/                   # PART 2: recovery-selection (imports schema, NEVER harvest); mostly stubs
-│       ├── competence/signals.py   # CompetenceSignals + CompetenceModel (the 4 tiers)          [stub]
-│       ├── metric/recovery_regret.py # RecoveryArm, ArmCost, CostWeights, recovery_regret         [stub]
-│       ├── arms/                   # the four recovery arms                                    [to build]
-│       ├── grid/                   # counterfactual reset-and-replay grid                      [to build]
-│       └── selector/               # the cost-aware selector                                   [to build]
+│   └── recovery/                   # PART 2: recovery-selection (imports schema, NEVER harvest); built
+│       ├── policy/base_policy.py   # BasePolicy Protocol + StubBasePolicy + FrozenACTPolicy (ACT stays frozen)
+│       ├── competence/signals.py   # the 4 competence tiers + safe-set floor (Proxy/ACT competence models)
+│       ├── failures/injection.py   # FailureMode catalog (5 kinds) + failure generators
+│       ├── backend.py              # RecoveryBackend Protocol (the reset-and-replay seam)
+│       ├── arms/                   # the four recovery arms (retry, rewind, replan, ask-human)
+│       ├── grid/counterfactual.py  # counterfactual reset-and-replay grid + per-failure oracle
+│       ├── metric/recovery_regret.py # ArmCost, CostWeights, recovery_regret + default weights
+│       └── selector/selector.py    # cost-sensitive selector (Lagrangian human-budget)
 ├── scripts/cluster/                # the AICR run playbook + scripts (data is cluster-only)
 │   ├── README.md                   # the cluster run playbook (order of operations)
 │   ├── 00_setup_env.sh             # one-time env: Blackwell torch cu128 + lerobot + mujoco
@@ -132,7 +139,9 @@ Harvest-Recovery/
 │   ├── harvest/test_sim_orientation.py # unknown-orientation grasp
 │   ├── harvest/test_sim_episode.py     # record_sim_demo + SimSource
 │   ├── harvest/test_reorient.py        # the demonstration generator
-│   └── recovery/test_recovery_stubs.py # the Part 2 NotImplementedError contract
+│   ├── harvest/test_label_visibility.py # the overhead label-visibility read (synthetic images + ROI)
+│   └── recovery/                        # Part 2 suite: base_policy, competence, injection, backend, arms,
+│                                        #   grid, metric, selector, smoke (+ the fenced sim_harness)
 └── experiments/                    # committed eval result JSONs (the audit records)
 ```
 
