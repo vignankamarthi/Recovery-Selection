@@ -1,5 +1,5 @@
 #!/bin/bash
-# Materialize the 600-episode streams (the videos) on the cluster to /scratch. The Mac keeps only
+# Materialize the 600-episode streams (the videos) on the cluster to /work (non-purging). The Mac keeps only
 # metadata; this reproduces the identical episodes (deterministic) with all 7 modalities saved.
 # MuJoCo headless renders via EGL on the GPU node. rtx-batch is plenty (sim + render, no training).
 #SBATCH --job-name=harvest-materialize
@@ -15,7 +15,7 @@ set -euo pipefail
 mkdir -p logs
 
 REPO=/home/kamarthi_v_neu/Harvest-Recovery
-OUT=/scratch/kamarthi_v_neu/harvest/streams_v1     # heavy .npz streams live on scratch (30-day purge)
+OUT=/work/neu/p2026_0016_neu/harvest/streams_v1     # heavy .npz streams on /work (7-day snapshots, no purge)
 
 module load miniforge3
 module load cuda

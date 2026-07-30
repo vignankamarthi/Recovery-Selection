@@ -38,7 +38,7 @@ def test_stub_is_a_base_policy_structurally():
 def test_frozen_act_policy_is_lazy_and_not_callable_locally():
     # The real ACT loader must not import torch at construction (keeps the module import torch-free),
     # and its inference path is AICR-only, so calling it locally raises a clear NotImplementedError.
-    pol = FrozenACTPolicy(checkpoint="/scratch/does/not/exist")
+    pol = FrozenACTPolicy(checkpoint="/work/does/not/exist")
     assert pol.frozen is True
     with pytest.raises(NotImplementedError):
         pol.predict({"proprioception": [0.0] * 7})

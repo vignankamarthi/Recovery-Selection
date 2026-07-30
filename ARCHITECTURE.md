@@ -162,7 +162,7 @@ Harvest-Recovery/
 │   ├── README.md                   # the cluster run playbook (order of operations)
 │   ├── 00_setup_env.sh             # one-time env: Blackwell torch cu128 + lerobot + mujoco
 │   ├── gen_dataset_parallel.py     # deterministic sharded episode generator (shard/assemble/local)
-│   ├── 10_materialize.slurm        # regenerate the 600 streams to /scratch (all 7 modalities)
+│   ├── 10_materialize.slurm        # regenerate the 600 streams to /work (persistent, no purge)
 │   ├── 20_build_lerobot_dataset.py # build a LeRobotDataset from streams (--split train|heldout)
 │   ├── 30_train_act.slurm          # lerobot-train the ACT policy on a B200
 │   ├── 80_rigorous_eval.py         # held-out predicted-action L1 vs a no-move baseline (the valid eval)

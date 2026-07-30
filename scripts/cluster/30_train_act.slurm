@@ -13,8 +13,8 @@
 set -euo pipefail
 mkdir -p logs
 
-DATASET_ROOT=/scratch/kamarthi_v_neu/harvest/lerobot_v1
-OUTPUT=/scratch/kamarthi_v_neu/harvest/act_out_v1
+DATASET_ROOT=/work/neu/p2026_0016_neu/harvest/lerobot_v1
+OUTPUT=/work/neu/p2026_0016_neu/harvest/act_out_v1
 REPO_ID=harvest/act_sim_v1
 
 module load miniforge3

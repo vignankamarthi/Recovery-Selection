@@ -29,7 +29,7 @@ ssh aicr 'git clone <REPO_URL> /home/kamarthi_v_neu/Harvest-Recovery' \
 ssh aicr 'salloc --partition=rtx-devel --gpus=1 --cpus-per-task=8 --mem=32G --time=01:00:00 \
   bash /home/kamarthi_v_neu/Harvest-Recovery/scripts/cluster/00_setup_env.sh'
 
-# 2. REGENERATE the 600-episode streams to /scratch with the NEW arm-slip (all 7 modalities,
+# 2. REGENERATE the 600-episode streams to /work (non-purging) with the NEW arm-slip (all 7 modalities,
 #    deterministic). Use a FRESH output dir so no old can-roll streams survive. ~15-40 min.
 #    (10_materialize.slurm runs scripts/cluster/gen_dataset_parallel.py.)
 ssh aicr 'cd /home/kamarthi_v_neu/Harvest-Recovery && sbatch scripts/cluster/10_materialize.slurm'
@@ -37,15 +37,15 @@ ssh aicr 'cd /home/kamarthi_v_neu/Harvest-Recovery && sbatch scripts/cluster/10_
 # 3. Build the TRAIN LeRobotDataset. INTEGRATION TEST 1 episode first (rebuild without --limit after).
 ssh aicr 'cd /home/kamarthi_v_neu/Harvest-Recovery && \
   python scripts/cluster/20_build_lerobot_dataset.py --split train \
-    --streams /scratch/kamarthi_v_neu/harvest/streams_v1 \
-    --out /scratch/kamarthi_v_neu/harvest/lerobot_v1 --repo-id harvest/act_sim_v1 --limit 1'
+    --streams /work/neu/p2026_0016_neu/harvest/streams_v1 \
+    --out /work/neu/p2026_0016_neu/harvest/lerobot_v1 --repo-id harvest/act_sim_v1 --limit 1'
 # verify the frame schema, then rebuild without --limit (fresh --out).
 
 # 3b. Build the HELD-OUT LeRobotDataset (val+test cans) for scoring. Fresh --out.
 ssh aicr 'cd /home/kamarthi_v_neu/Harvest-Recovery && \
   python scripts/cluster/20_build_lerobot_dataset.py --split heldout \
-    --streams /scratch/kamarthi_v_neu/harvest/streams_v1 \
-    --out /scratch/kamarthi_v_neu/harvest/lerobot_heldout --repo-id harvest/act_sim_heldout'
+    --streams /work/neu/p2026_0016_neu/harvest/streams_v1 \
+    --out /work/neu/p2026_0016_neu/harvest/lerobot_heldout --repo-id harvest/act_sim_heldout'
 
 # 4. Train ACT. INTEGRATION TEST first: edit 30_train_act.slurm to rtx-batch + a small --steps,
 #    confirm it steps, then submit the full B200 run (~35 min, 40k steps).
@@ -56,9 +56,9 @@ ssh aicr 'cd /home/kamarthi_v_neu/Harvest-Recovery && sbatch scripts/cluster/30_
 #    node first (it is short), read the JSON, then trust it. Weld-independent, replaces the rollout.
 ssh aicr 'cd /home/kamarthi_v_neu/Harvest-Recovery && \
   python scripts/cluster/80_rigorous_eval.py \
-    --checkpoint /scratch/kamarthi_v_neu/harvest/act_out_v1/checkpoints/last/pretrained_model \
-    --train-root /scratch/kamarthi_v_neu/harvest/lerobot_v1 \
-    --heldout-root /scratch/kamarthi_v_neu/harvest/lerobot_heldout \
+    --checkpoint /work/neu/p2026_0016_neu/harvest/act_out_v1/checkpoints/last/pretrained_model \
+    --train-root /work/neu/p2026_0016_neu/harvest/lerobot_v1 \
+    --heldout-root /work/neu/p2026_0016_neu/harvest/lerobot_heldout \
     --out experiments/act_rigorous_eval.json'
 
 # 6. Pull the small JSON back for the red/blue audit + GATE 3. (script-written, never hand-edited)
