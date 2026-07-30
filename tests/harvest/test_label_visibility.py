@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 
 from harvest.vision.label_visibility import (
+    CAMPBELL_RED_SPEC,
     DEFAULT_MIN_COVERAGE_PX,
     LabelSpec,
     LabelVisibility,
@@ -124,6 +125,16 @@ def test_hsv_mode_rejects_out_of_band_color():
     img = _paint(_canvas(), 90, 110, 80, 120, (0.05, 0.05, 0.85))   # blue, hue ~0.66
     spec = LabelSpec(mode="hsv", hue=(0.95, 0.05), sat=(0.5, 1.0), val=(0.3, 1.0))
     assert label_visibility(img, spec).coverage_px == 0
+
+
+def test_campbell_red_spec_matches_brand_red_not_white_or_metal():
+    img = _canvas()
+    _paint(img, 90, 110, 80, 120, (0.80, 0.10, 0.12))              # Campbell brand red band
+    _paint(img, 90, 110, 130, 170, (0.93, 0.93, 0.93))            # white nutrition sub-panel
+    _paint(img, 0, 20, 0, 40, (0.75, 0.76, 0.80))                 # bare steel end (light gray)
+    r = label_visibility(img, CAMPBELL_RED_SPEC)
+    assert r.coverage_px == 800                                   # only the red band, 20x40
+    assert r.visible is True
 
 
 def test_rgb_to_hsv_matches_known_values():

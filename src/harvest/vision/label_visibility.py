@@ -38,6 +38,14 @@ class LabelSpec:
     val: tuple[float, float] = (0.0, 1.0)
 
 
+# Starting spec for a REAL Campbell-style can, validated on real can photos (2026-07-30). The nutrition
+# facts sit on the saturated red brand band, so red coverage tracks the label facing the overhead camera,
+# and red is distinctive against the bare steel ends, a light robot arm, and the table. The sim's near-white
+# default does NOT transfer (it matched ~0.2% of a real can, red matched ~6%). Retune the bands under the
+# actual overhead camera + lighting before trusting the numbers.
+CAMPBELL_RED_SPEC = LabelSpec(mode="hsv", hue=(0.95, 0.05), sat=(0.45, 1.0), val=(0.30, 1.0))
+
+
 @dataclass(frozen=True)
 class LabelVisibility:
     """The overhead label read. ``coverage_px`` is the raw label-pixel count (the direct analog of the
