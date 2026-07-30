@@ -34,12 +34,24 @@ def write_episode_streams(rec: RecordedEpisode, out_dir: Path | str) -> dict:
     arrays: dict[str, np.ndarray] = {}
     for key, samples in rec.streams.items():
         s_sorted = sorted(samples, key=lambda s: s.timestamp_ns)
+        sample_manifests: list[dict] = []
+        for i, s in enumerate(s_sorted):
+            entry: dict = {"timestamp_ns": s.timestamp_ns, "notes": s.notes}
+            # Structured payloads (e.g. a TactileFrame carrying pressure/dynamic/IMU) expose
+            # `as_arrays()`; store each named sub-array under a sub-key. Plain array data (every
+            # other stream) is stored as a single array exactly as before.
+            if hasattr(s.data, "as_arrays"):
+                payload = s.data.as_arrays()
+                entry["payload"] = list(payload.keys())
+                for name, arr in payload.items():
+                    arrays[f"{key}__{i}__{name}"] = np.asarray(arr)
+            else:
+                arrays[f"{key}__{i}"] = np.asarray(s.data)
+            sample_manifests.append(entry)
         manifest["streams"][key] = {
             "modality": s_sorted[0].modality.value if s_sorted else None,
-            "samples": [{"timestamp_ns": s.timestamp_ns, "notes": s.notes} for s in s_sorted],
+            "samples": sample_manifests,
         }
-        for i, s in enumerate(s_sorted):
-            arrays[f"{key}__{i}"] = np.asarray(s.data)
     np.savez(out_dir / "data" / f"{rec.episode.episode_id}.npz", **arrays)
     return manifest
 
@@ -73,9 +85,13 @@ def load_export(out_dir: Path | str) -> list[RecordedEpisode]:
         streams: dict[str, list[Sample]] = {}
         for key, sm in manifest["streams"].items():
             modality = Modality(sm["modality"])
-            streams[key] = [
-                Sample(modality, man["timestamp_ns"], npz[f"{key}__{i}"], man["notes"])
-                for i, man in enumerate(sm["samples"])
-            ]
+            samples: list[Sample] = []
+            for i, man in enumerate(sm["samples"]):
+                if "payload" in man:                    # structured payload -> dict of named arrays
+                    data: object = {name: npz[f"{key}__{i}__{name}"] for name in man["payload"]}
+                else:
+                    data = npz[f"{key}__{i}"]
+                samples.append(Sample(modality, man["timestamp_ns"], data, man["notes"]))
+            streams[key] = samples
         result.append(RecordedEpisode(episode=episode, streams=streams))
     return result
