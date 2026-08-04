@@ -7,10 +7,11 @@ It emits an `RGB_OVERHEAD` Sample by default (configurable), whose `data` is an 
 (or HxW for depth).
 
 numpy lives here, never in schema. The frame source is injected as a `FrameGrabber`, so the whole
-SensorSource path is testable with synthetic frames and no hardware and no cv2. At the bench, the
-default `OpenCVGrabber` opens a USB webcam through OpenCV (the prototype overhead path); the Azure
-Kinect DK path is a marked seam, wired with pyk4a / the Azure Kinect SDK on the real box (its depth
-engine needs a GPU + physical terminal, so it is never exercised in these tests).
+SensorSource path is testable with synthetic frames and no hardware, no cv2, and no pyrealsense2. The
+confirmed overhead camera (2026-08-04) is an Intel RealSense D435i, so `RealSenseGrabber` (lazy
+`pyrealsense2`, RGB + aligned depth off one device) is the real path. `OpenCVGrabber` still opens the
+D435i's color stream as a plain USB webcam for a quick RGB-only bring-up. The `AzureKinectGrabber` seam
+is kept but superseded (the lab camera is the D435i, not the Kinect).
 """
 from __future__ import annotations
 
@@ -82,6 +83,87 @@ class AzureKinectGrabber:
 
     def close(self) -> None:                               # pragma: no cover - seam, never reached
         raise NotImplementedError
+
+
+class RealSenseSource:
+    """One Intel RealSense (D435i) device pipeline, color + depth with depth ALIGNED to the color frame.
+
+    Lazy `pyrealsense2`, so importing this module needs no RealSense dep. Both overhead streams
+    (`rgb_overhead`, `depth_overhead`) come off this one device, so a single source backs two grabbers.
+    `poll()` grabs one aligned frameset and caches color (converted BGR->RGB) + depth (uint16, mm). The
+    BGR->RGB conversion is load-bearing, the label read's `CAMPBELL_RED_SPEC` targets red, so a missed
+    swap would match blue instead. `start()` / `stop()` are idempotent so two grabbers can share one
+    source. Frames are untested until bench-validated against the live D435i (timing + color/depth align)."""
+
+    def __init__(self, width: int = 640, height: int = 480, fps: int = 30, _rs=None):
+        self._width, self._height, self._fps = width, height, fps
+        self._rs = _rs                         # inject a fake for tests; else lazy pyrealsense2
+        self._pipeline = None
+        self._align = None
+        self._color: Optional[np.ndarray] = None
+        self._depth: Optional[np.ndarray] = None
+
+    def start(self) -> None:
+        if self._pipeline is not None:         # idempotent (shared by color + depth grabbers)
+            return
+        if self._rs is None:
+            import pyrealsense2 as rs           # lazy: only when opening real hardware
+            self._rs = rs
+        rs = self._rs
+        cfg = rs.config()
+        cfg.enable_stream(rs.stream.color, self._width, self._height, rs.format.bgr8, self._fps)
+        cfg.enable_stream(rs.stream.depth, self._width, self._height, rs.format.z16, self._fps)
+        self._pipeline = rs.pipeline()
+        self._pipeline.start(cfg)
+        self._align = rs.align(rs.stream.color)
+
+    def poll(self) -> None:
+        """Grab one aligned frameset, cache color as RGB and depth as uint16."""
+        frames = self._pipeline.wait_for_frames()
+        aligned = self._align.process(frames)
+        color_bgr = np.asanyarray(aligned.get_color_frame().get_data())
+        self._color = np.ascontiguousarray(color_bgr[..., ::-1])    # BGR -> RGB
+        self._depth = np.asanyarray(aligned.get_depth_frame().get_data())
+
+    def color(self) -> np.ndarray:
+        if self._color is None:
+            self.poll()
+        return self._color
+
+    def depth(self) -> np.ndarray:
+        if self._depth is None:
+            self.poll()
+        return self._depth
+
+    def stop(self) -> None:
+        if self._pipeline is not None:
+            self._pipeline.stop()
+            self._pipeline = None
+
+
+class RealSenseGrabber:
+    """A `FrameGrabber` view over a `RealSenseSource` for one stream, 'color' (RGB) or 'depth' (uint16 mm).
+
+    The confirmed overhead camera (2026-08-04) is an Intel RealSense D435i, so this replaces the
+    Azure-Kinect seam. `read()` polls the device for a fresh frame and returns the selected stream. A
+    single D435i backs BOTH overhead streams, pass the same `source` to an `rgb_overhead` grabber and a
+    `depth_overhead` grabber (each polls, so their framesets sit ~1/fps apart, fine for per-tick
+    recording); pass no source for the common single-stream case and it opens its own."""
+
+    def __init__(self, stream: str = "color", *, width: int = 640, height: int = 480, fps: int = 30,
+                 source: Optional[RealSenseSource] = None):
+        if stream not in ("color", "depth"):
+            raise ValueError(f"stream must be 'color' or 'depth', got {stream!r}")
+        self._stream = stream
+        self._source = source if source is not None else RealSenseSource(width, height, fps)
+
+    def read(self) -> np.ndarray:
+        self._source.start()                   # idempotent
+        self._source.poll()
+        return self._source.color() if self._stream == "color" else self._source.depth()
+
+    def close(self) -> None:
+        self._source.stop()                    # idempotent (safe when the source is shared)
 
 
 class CameraSource:
