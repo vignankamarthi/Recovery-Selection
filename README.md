@@ -73,7 +73,10 @@ Harvest-Recovery/
 │   │   ├── labels.py               # canonical label-name constants (shared producer <-> consumer)
 │   │   ├── sensors/
 │   │   │   ├── base.py             # SensorSource Protocol (the sensor seam)
-│   │   │   └── mock.py             # MockSource: deterministic synthetic source for tests
+│   │   │   ├── mock.py             # MockSource: deterministic synthetic source for tests
+│   │   │   ├── tsf85.py            # TSF85Source: Robotiq TSF-85 tactile over USB (pressure/dynamic/IMU) + calibration
+│   │   │   ├── camera.py           # CameraSource + RealSenseGrabber (D435i) / OpenCVGrabber (overhead RGB-D)
+│   │   │   └── vendor/robotiq_tsf85_protocol.py  # vendored Robotiq USB frame parser (BSD-3)
 │   │   ├── recorder/
 │   │   │   └── recorder.py         # record_episode: sensor-agnostic sampling loop + timestamp check
 │   │   ├── protocol/
@@ -102,7 +105,8 @@ Harvest-Recovery/
 │   │   ├── policy/
 │   │   │   └── trainer.py          # Trainer Protocol + StubTrainer (baseline floor) + LeRobotACTTrainer
 │   │   ├── vision/
-│   │   │   └── label_visibility.py # overhead label-visibility read (numpy-only; the SceneOracle's real-camera label read)
+│   │   │   ├── label_visibility.py # overhead label-visibility read (numpy-only; CAMPBELL_RED_SPEC for real cans)
+│   │   │   └── aruco_calibration.py # planar eye-to-hand homography (overhead pixels -> table coords)
 │   │   └── annotation/             # placeholder for hardware-phase labeling tools
 │   └── recovery/                   # PART 2: recovery-selection (imports schema, NEVER harvest); built
 │       ├── policy/base_policy.py   # BasePolicy Protocol + StubBasePolicy + FrozenACTPolicy (ACT stays frozen)

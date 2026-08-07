@@ -127,6 +127,9 @@ Harvest-Recovery/
 │   │   ├── labels.py               # canonical label-name constants (shared producer <-> consumer)
 │   │   ├── sensors/base.py         # SensorSource Protocol (the sensor seam)
 │   │   ├── sensors/mock.py         # MockSource: deterministic synthetic source for tests
+│   │   ├── sensors/tsf85.py        # TSF85Source: Robotiq TSF-85 tactile over USB (pressure/dynamic/IMU) + calibration
+│   │   ├── sensors/camera.py       # CameraSource + RealSenseGrabber (D435i) / OpenCVGrabber (overhead RGB-D)
+│   │   ├── sensors/vendor/robotiq_tsf85_protocol.py  # vendored Robotiq USB frame parser (BSD-3)
 │   │   ├── recorder/recorder.py    # record_episode: sensor-agnostic sampling loop + timestamp check
 │   │   ├── protocol/protocol.py    # EpisodeProtocol FSM for a real collection session (hardware/mock path)
 │   │   ├── control/backend.py      # RobotBackend + SceneOracle + GraspBackend Protocols (the hardware seam)
@@ -147,7 +150,8 @@ Harvest-Recovery/
 │   │   ├── dataset/competence.py   # proxy competence-tier tagging from a held-out margin
 │   │   ├── dataset/generate.py     # the grid driver (conditions x orientations x poses)
 │   │   ├── policy/trainer.py       # Trainer Protocol + StubTrainer (baseline floor) + LeRobotACTTrainer
-│   │   ├── vision/label_visibility.py # overhead label-visibility read (numpy-only; the SceneOracle's real-camera label read)
+│   │   ├── vision/label_visibility.py # overhead label-visibility read (numpy-only; CAMPBELL_RED_SPEC for real cans)
+│   │   ├── vision/aruco_calibration.py # planar eye-to-hand homography (overhead pixels -> table coords)
 │   │   └── annotation/             # placeholder for hardware-phase labeling tools
 │   └── recovery/                   # PART 2: recovery-selection (imports schema, NEVER harvest);
 │       ├── policy/base_policy.py   # BasePolicy Protocol + StubBasePolicy + FrozenACTPolicy (ACT stays frozen)
@@ -201,8 +205,13 @@ Harvest-Recovery/
 - `labels.py` -- canonical label-name constants (`UPRIGHT_SUCCESS`, `GRASP_STABLE`, `LABEL_VISIBLE`,
   `LABEL_UP_COS`), imported by both the producer (`sim/episode.py`) and the consumer
   (`dataset/competence.py`) so a rename cannot silently break tier tagging.
-- `sensors/` -- `SensorSource` Protocol (`base.py`) + `MockSource` (`mock.py`), the deterministic
-  synthetic source for tests.
+- `sensors/` -- `SensorSource` Protocol (`base.py`) + `MockSource` (`mock.py`, the deterministic
+  synthetic source for tests), plus the hardware sources built ahead of the rig, `tsf85.py`
+  (`TSF85Source` over Robotiq's vendored USB parser in `vendor/`, the passive TSF-85 tactile, with
+  per-taxel calibration) and `camera.py` (`CameraSource` + a `RealSenseGrabber` for the overhead D435i,
+  an `OpenCVGrabber` for a plain USB webcam). Each injects its device behind a small seam, so the decode
+  is tested with synthetic frames and the real hardware libs (`pyserial`, `pyrealsense2`, `cv2`) stay
+  lazy.
 - `recorder/` -- `record_episode`, the sensor-agnostic sampling loop that pulls each modality on a clock
   and checks timestamp consistency.
 - `protocol/` -- `EpisodeProtocol`, a finite-state machine for a real collection session (the
@@ -222,7 +231,10 @@ Harvest-Recovery/
 - `vision/` -- `label_visibility.py`, the overhead label-visibility read (numpy only). Reads label pixel
   coverage + a visible/legible flag (Padir's 70px bar) from an RGB frame, with a swappable `LabelSpec`
   (RGB-distance or HSV) and an optional ROI. The real-camera equivalent of the sim's segmentation label
-  read, so it fills the `SceneOracle`'s label answer on hardware.
+  read, so it fills the `SceneOracle`'s label answer on hardware (the `CAMPBELL_RED_SPEC` preset targets a
+  real can's red band). `aruco_calibration.py` is the eye-to-hand calibration, a `PlanarCalibration` that
+  maps overhead pixels to table coordinates by a normalized-DLT homography (pure numpy, ArUco detection a
+  lazy-cv2 helper).
 - `annotation/` -- placeholder for the hardware-phase labeling tools.
 
 **`src/recovery/`** (Part 2, built in Milestone 2)
