@@ -10,7 +10,7 @@ red/blue audit found the sim demos were UNTEACHABLE (the slip rotated the can wh
 frozen, so the failure was not in the action ACT imitates). `sim/reorient.py::_slip_roll` now rolls the
 end-effector about the can's long axis via IK, so all seven arm joints carry the failure. This re-run
 REGENERATES the dataset with the new slip, retrains, and rescores. The old closed-loop rollout eval
-was WELD-INVALID and has been REMOVED; the dataloader-scored `80_rigorous_eval.py` is the valid eval.
+was WELD-INVALID and was REMOVED. The dataloader-scored `80_rigorous_eval.py` is the valid eval.
 
 **Status, UNTESTED until the cluster (no local torch/lerobot).** Follow the cluster convention,
 integration-test ONE unit on the real GPU at each step before the full run. The LeRobot dataset and
@@ -87,10 +87,10 @@ beats no-move on held-out cans, and a small train->held-out gap means it general
 - `80_rigorous_eval.py` is the VALID eval. It scores through LeRobot's own dataloader (matching the
   training obs pipeline), reports eval-mode (z=prior) predicted-action L1 + a no-move baseline + the
   train-mode loss components, and writes JSON straight from the numbers. `policy.model(nb)` returning
-  `(actions_hat, ...)` and `unnormalize_outputs` are the version-sensitive calls, integration-run the
+  `(actions_hat, ...)` and `unnormalize_outputs` are the version-sensitive calls. Integration-run the
   script on a dev node first and read the JSON before trusting it.
 - The closed-loop rollout eval (formerly `40_eval_rollout.py` / `50_eval.slurm`) and the superseded
-  `60_predict_eval.py` have been REMOVED: rollout is weld-invalid (a learned policy cannot reproduce the
+  `60_predict_eval.py` were REMOVED. Rollout is weld-invalid (a learned policy cannot reproduce the
   scripted search+weld presentation), and `80_rigorous_eval.py` replaces the prediction metric.
 - This is the sim ACT baseline (a smoke test / prototype). The REPORTED ACT baseline is the physical
   dataset (Phase 3). GATE 3 (1.13) reviews this run + the tactile ablation before Part 2.

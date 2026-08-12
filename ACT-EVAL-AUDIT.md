@@ -1,7 +1,7 @@
 # ACT rigorous-eval red/blue audit (2026-07-24, post arm-slip fix)
 
 Mandatory gate on the result-producing run `experiments/act_rigorous_eval.json`. RED and BLUE were
-dispatched in parallel; this is the primary synthesis.
+dispatched in parallel. This is the primary synthesis.
 
 ## What was claimed
 "After the arm-slip fix made the demos teachable, the sim ACT baseline OVERFITS: it fits the 140
@@ -15,13 +15,13 @@ than no-move)."
 
 ## VERDICT: NO-GO on the "overfitting" claim. The sim gives software/pipeline validation ONLY, not an ACT ML-capability signal.
 RED and BLUE are both right, and they are compatible. The measurement pipeline is now technically
-correct (BLUE), but it measures a quantity that is unlearnable by construction (RED), so the result
-reflects the demonstration generator, not ACT's capacity.
+correct (BLUE), but it measures a quantity that is unlearnable by construction (RED). The result
+therefore reflects the demonstration generator, not ACT's capacity.
 
 ### What is solid (BLUE, and RED concurs on these)
 1. The eval pipeline is faithful to LeRobot's own train/rollout usage. `make_pre_post_processors` +
    `pre(batch)` before `predict_action_chunk`, `post(pred)` after, `forward(pre(batch))` for the loss.
-2. The normalization fix is proven: train teacher-forced l1_loss 0.0057 matches the training-reported
+2. The normalization fix is proven. Train teacher-forced l1_loss 0.0057 matches the training-reported
    0.006, recovered by an independent code path. The earlier un-normalized version scored 1.12 on
    train (worse than no-move), which was the bug, now gone.
 3. The by-can split is leak-free (each can_id in exactly one split). no-move is a legitimate trivial
@@ -39,7 +39,7 @@ reflects the demonstration generator, not ACT's capacity.
      [-0.18, 0.18] of severity (~+/-9 deg of roll against a 23 deg cliff), seed = `can_seed_from_id`.
      ACT sees RGB + proprioception, never the seed, so the per-can slip is unpredictable on held-out.
    - **The presentation pose is a hidden per-can argmax.** `_search_present` sweeps 24 wrist rolls on
-     a scratch sim and keeps the first clearing a pixel threshold (discontinuous, early-break); the
+     a scratch sim and keeps the first clearing a pixel threshold (discontinuous, early-break). The
      glide interpolates the real arm to that snapshot. Which roll wins is a discretized function of
      geometry + IK null-space, not a smooth function of the two camera views.
    - **IK winding.** `move_pinch_pose` adds `dq` with no null-space regularization or joint wrapping,
@@ -58,13 +58,13 @@ reflects the demonstration generator, not ACT's capacity.
    in-sample (measures convergence, not skill). A stronger baseline (nearest-neighbor, mean trajectory)
    was not tried.
 4. The per-condition breakdown that would test the causal story (do nominal cans generalize, damaged
-   not?) is unrunnable as built: `20_build_lerobot_dataset.py` writes a constant `task`, never the
+   not?) is unrunnable as built. `20_build_lerobot_dataset.py` writes a constant `task`, never the
    condition, so `81_eval_diagnostic.py` bucketed everything as "unknown."
 5. Single seed, single run, no CI. Held-out is 60 per-can-deterministic cans, so 0.772 vs 0.600 (29%
    worse) is inside unquantified noise. Only the normalized teacher-forced 9x gap is a robust
    quantitative statement, and even it is a property of the demo generator.
 6. `predict_action_chunk` (open-loop, z=prior) is not the deployed `select_action` (temporal ensemble)
-   path; fine for an offline L1 but should be stated.
+   path. This is fine for an offline L1 but should be stated.
 
 ## What survives
 - The pipeline runs end-to-end and the instrumentation is now trustworthy (software validation: PASS).
@@ -99,10 +99,10 @@ Why (RED F4, structural, not fixable by training). Two of the three prior unlear
 (seed-hash slip, winding), but the third remains, the presentation is a discretized argmax over reachable
 headings that a 96x96 RGB frame cannot resolve, so the observation UNDER-DETERMINES the action. Proof,
 teacher-forced held-out l1 is still 8.5x train, meaning even handing the decoder the ground-truth action's
-VAE latent, obs+latent cannot reconstruct held-out actions. A NEW artifact was also introduced, wrapping
+VAE latent, obs+latent cannot reconstruct held-out actions. A NEW artifact was also introduced. Wrapping
 trades unbounded winding for a +/-pi seam (two near-identical poses across the seam differ by ~2pi in the
-recorded action). And a deeper tension surfaced, a SIMPLER (learnable) presentation is not reachable
-(a fixed heading reached ~2/10; the search exists precisely because reachability is complex), so
+recorded action). A deeper tension also surfaced. A SIMPLER (learnable) presentation is not reachable
+(a fixed heading reached ~2/10, and the search exists precisely because reachability is complex), so
 reachability and learnability pull against each other in this sim.
 
 HONEST RESTATEMENT of the result (RED's wording, adopted): "Option B removed two artifacts and produced a

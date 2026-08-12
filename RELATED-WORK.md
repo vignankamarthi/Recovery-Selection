@@ -17,7 +17,7 @@ against our contributions, so the framing is settled before drafting.
   capacitive taxels.
 - **Results.** It wins all nine real-robot NeoReal tasks, hits 63.8% mean success on a 20-task sim suite
   (vs 44.0% for the strongest baseline), and reaches 75-95% on three long-horizon real tasks with ALTER.
-- **Why it matters to us.** It is independent, contemporaneous confirmation of the HARVEST premise, that in
+- **Why it matters to us.** It is independent, contemporaneous confirmation of the HARVEST premise. In
   contact-rich manipulation the decisive information at contact is force and slip, and vision-only policies
   fail there. It is the strongest available motivation for the tactile ablation.
 - **How we position against it (it is motivation, not a competitor).**
@@ -38,9 +38,9 @@ against our contributions, so the framing is settled before drafting.
 
 ### The broader 2026 VTLA / tactile wave (adjacent, cite for context)
 
-A cluster of 2026 papers puts tactile into manipulation policies, so the RA-L related-work should show the
-thread is hot and then carve out our controlled-benchmark-plus-recovery angle. Seen while sourcing N0-VTLA,
-confirm each before citing:
+A cluster of 2026 papers puts tactile into manipulation policies. The RA-L related-work should therefore
+show the thread is hot and then carve out our controlled-benchmark-plus-recovery angle. Seen while
+sourcing N0-VTLA, confirm each before citing:
 - OmniVTLA (arXiv:2508.08706), semantic-aligned tactile sensing in a VTLA.
 - TacVLA (arXiv:2603.12665), contact-aware tactile fusion for robust VLA manipulation.
 - AT-VLA (arXiv:2605.07308), adaptive tactile injection for feedback reaction in VLAs.

@@ -12,9 +12,9 @@ cans (5 conditions x 40 cans x 3 poses). The Mac holds metadata only, the heavy 
 are materialized on the cluster at ACT time. Three graded labels plus the held-out `label_up_cos`
 margin. All numbers below come from `metadata.jsonl`.
 
-The task realized in the dataset is this. A can spawns lying, the robot grasps it by the head, reorients
-it in hand directly to horizontal with the nutrition label facing the fixed overhead camera, and
-the overhead read plus the reorient geometry decide the outcome. Failures are a condition-scaled
+The task realized in the dataset is this. A can spawns lying, the robot grasps it by the head, and
+reorients it in hand directly to horizontal with the nutrition label facing the fixed overhead camera.
+The overhead read plus the reorient geometry decide the outcome. Failures are a condition-scaled
 in-hand slip. This matches the proposal's grasp -> in-hand reorient -> expose-label -> verify
 episode, with the deliberate, documented deviations (all-lying spawn, head grasp, direct reorient
 with no stand-upright step).
