@@ -1,0 +1,25 @@
+# teleop_twist_joy for the Logitech F310 (XInput) -> Kinova Gen3 twist_controller.
+# NO deadman (require_enable_button: false). The PHYSICAL kill switch is the safety. Sticks rest at zero,
+# so at rest the arm commands zero motion. FPS-style, operator behind the robot:
+#   LEFT stick  = translate on the table  (up/down = forward/back, left/right = strafe)
+#   RIGHT stick = up/down (stick Y) + turn/yaw (stick X)
+#   D-PAD       = tilt (pitch) / roll
+/**:
+  ros__parameters:
+    require_enable_button: false
+    axis_linear:
+      x: 0        # left stick X -> base X (operator forward/back after 90deg base offset)
+      y: 1        # left stick Y -> base Y (operator left/right)
+      z: 4        # right stick Y -> up/down
+    scale_linear:
+      x: 0.05     # left stick left/right (flipped 2026-08-11)
+      y: 0.05     # left stick up=forward / down=back (flipped 2026-08-11)
+      z: -0.05    # up = raise gripper
+    axis_angular:
+      yaw: 3      # right stick X -> turn about vertical
+      pitch: 6    # d-pad X (swapped 2026-08-11 so d-pad matches operator view)
+      roll: 7     # d-pad Y
+    scale_angular:
+      yaw: -15.0    # right stick X = gripper rotation, max sensitivity 2026-08-11 (joint vel limit caps it)
+      pitch: -3.0   # d-pad left/right, 5x faster 2026-08-11
+      roll: 12.0    # d-pad up/down, fast 2026-08-11
