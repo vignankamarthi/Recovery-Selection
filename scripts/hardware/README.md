@@ -48,4 +48,5 @@ Run everything with the ROS system python and `PYTHONPATH=src:$PYTHONPATH` (bare
   It probes each sensor (fail-fast), warms up, then ON/OFF button, press ENTER to START, teleoperate the task,
   press ENTER again (or Ctrl-C) to STOP. Uses `record_ticks` (synchronized per-tick, atomic, drop-tolerant) and
   writes one flat-npz episode. Validated at ~14 Hz, 0 drops, <1 ms per-tick sync across all 5 available streams.
-- Current bench = 5 of 7 streams (wrist rgb+depth need the Gen3 wrist module, absent here).
+- Current bench = 5 of 7 streams. The Gen3 wrist vision module (wrist rgb+depth) EXISTS on this arm, it is just
+  not wired into capture yet (add its `kinova_vision` stream to `bench_sources.py`).

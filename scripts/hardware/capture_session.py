@@ -67,7 +67,7 @@ def _summarize(rec, duration_s: float) -> bool:
         med_ms = spreads[len(spreads) // 2] / 1e6
         max_ms = spreads[-1] / 1e6
         print(f"\n  per-tick cross-stream spread: median {med_ms:.1f} ms, max {max_ms:.1f} ms  ({n_ticks} ticks)")
-    print(f"  session duration: {duration_s:.1f} s, streams: {len(keys)} / 7 (wrist rgb+depth need a wrist camera)")
+    print(f"  session duration: {duration_s:.1f} s, streams: {len(keys)} / 7 (wrist rgb+depth = Gen3 vision module, not wired into capture yet)")
     return ok
 
 

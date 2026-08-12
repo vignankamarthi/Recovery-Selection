@@ -11,8 +11,9 @@ the dataset uses:
   depth_overhead  <- Intel RealSense D435i depth     (CameraSource + RealSenseGrabber, one shared device)
   tactile         <- Robotiq TSF-85 fingertips       (TSF85Source over USB serial)
 
-That is 5 of the 7 HARVEST streams. The two wrist streams (rgb_wrist, depth_wrist) need a wrist camera
-this bench does not have, so they are out of scope here and reported as such.
+That is 5 of the 7 HARVEST streams. The two wrist streams (rgb_wrist, depth_wrist) come from the Gen3
+wrist vision module, which EXISTS on this arm but is not yet wired into capture (it streams on the
+separate kinova_vision channel), so it is out of scope for this snapshot.
 
 Run it with the ROS system python so rclpy is importable:
 
@@ -155,7 +156,7 @@ def main() -> int:
     print(f"  reloaded {len(reloaded)} episode(s), streams={sorted(rt.streams.keys())}, round-trip={'OK' if rt_ok else 'MISMATCH'}")
 
     print("\n== result ==")
-    print(f"  streams captured: {len(rec.streams)} / 7 HARVEST streams (wrist rgb+depth need a wrist camera, absent on this bench)")
+    print(f"  streams captured: {len(rec.streams)} / 7 HARVEST streams (wrist rgb+depth = Gen3 vision module, present but not wired into capture yet)")
     verdict = ok and rt_ok and npz.exists()
     print(f"  VALIDATION: {'PASS' if verdict else 'FAIL'}")
     return 0 if verdict else 1
