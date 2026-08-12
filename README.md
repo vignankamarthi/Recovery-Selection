@@ -12,8 +12,8 @@ damaged cans). Targets **IEEE RA-L**. PI Prof. Taskin Padir, partner Good Shephe
 **Part 2, recovery-selection (our contribution).** Learning _which_ recovery a failed policy should run.
 When a learned policy fails, the best recovery depends on the kind of failure, yet current systems
 hard-code a single recovery behavior. We make recovery-strategy selection a learnable, cost-aware
-decision (four competence tiers -> four recovery arms, chosen under a budget), and aim to show a small
-learned selector beats any fixed single-mechanism baseline at matched intervention budget. The failures
+decision (four competence tiers -> four recovery arms, chosen under a budget). We aim to show that a
+small learned selector beats any fixed single-mechanism baseline at matched intervention budget. The failures
 the HARVEST policy makes on damaged cans are the substrate the recovery layer consumes. Targets **CoRL
 2027** (ICRA workshop on-ramp).
 
@@ -21,18 +21,18 @@ the HARVEST policy makes on damaged cans are the substrate the recovery layer co
 
 Condition-aware in-hand pick-and-reorient. The robot grasps a can of unknown orientation and reorients it
 in hand to expose the nutrition label, then the overhead camera verifies the label is legible and covers
-enough of the frame. A dented or bulged can reorients differently than a nominal one, so it slips more,
-and in-hand reorientation is exactly where tactile sensing earns its keep. The slip is a feature, it is
+enough of the frame. A dented or bulged can reorients differently than a nominal one, so it slips more.
+In-hand reorientation is exactly where tactile sensing earns its keep. The slip is a feature. It is
 both the tactile signal Part 1 measures and the failure substrate Part 2 recovers from.
 
 ## Status
 
 Software build phase complete, sim-first. Milestone 1 (the HARVEST framework + the ACT baseline pipeline)
 and Milestone 2 (the full recovery layer + a sim dry-run of the make-or-break) are built and tested, and
-the overhead label-visibility read is done, so all robot-free software is finished and the project is now
-on the hardware on-ramp. The simulation is a **smoke test**, it validates the recording and training
-pipeline but its ACT numbers are not trusted as evidence (see `ACT-EVAL-AUDIT.md` for why, the scripted
-demo's target is not a learnable function of the observation). The reported ACT baseline, tactile
+the overhead label-visibility read is done. All robot-free software is therefore finished, and the
+project is now on the hardware on-ramp. The simulation is a **smoke test**. It validates the recording
+and training pipeline, but its ACT numbers are not trusted as evidence (see `ACT-EVAL-AUDIT.md` for why,
+the scripted demo's target is not a learnable function of the observation). The reported ACT baseline, tactile
 ablation, and the binding recovery make-or-break all come from the **hardware** dataset, where
 demonstrations are human teleop. `proposal/PROPOSAL.tex` is the source of truth for scope and method.
 
@@ -76,9 +76,10 @@ Harvest-Recovery/
 │   │   │   ├── mock.py             # MockSource: deterministic synthetic source for tests
 │   │   │   ├── tsf85.py            # TSF85Source: Robotiq TSF-85 tactile over USB (pressure/dynamic/IMU) + calibration
 │   │   │   ├── camera.py           # CameraSource + RealSenseGrabber (D435i) / OpenCVGrabber (overhead RGB-D)
+│   │   │   ├── ros_source.py        # RosSource + LiveRosBridge: proprioception + force_torque from /joint_states
 │   │   │   └── vendor/robotiq_tsf85_protocol.py  # vendored Robotiq USB frame parser (BSD-3)
 │   │   ├── recorder/
-│   │   │   └── recorder.py         # record_episode: sensor-agnostic sampling loop + timestamp check
+│   │   │   └── recorder.py         # record_episode (sequential) + record_ticks (synchronized live capture)
 │   │   ├── protocol/
 │   │   │   └── protocol.py         # EpisodeProtocol FSM for a real collection session (hardware/mock path)
 │   │   ├── control/                # backend-agnostic control layer (MuJoCo-free)

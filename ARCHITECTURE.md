@@ -35,7 +35,7 @@ flowchart LR
   recovery-regret metric, and the selector. It may import `schema`. It may NOT import `harvest` internals.
 
 Why bother? The two tracks target different papers (Part 1 -> IEEE RA-L, Part 2 -> CoRL) and different
-timelines, and Part 2 must treat the trained policy as a frozen black box. The fence makes that
+timelines. Part 2 must also treat the trained policy as a frozen black box. The fence makes that
 separation a checkable property, not a promise. You can verify it in one command:
 
 ```bash
@@ -88,7 +88,7 @@ implementation to come. These are the seams to know:
 
 | Seam (Protocol)                | Where                | Sim implementation                                | Hardware implementation (later)                |
 | ------------------------------ | -------------------- | ------------------------------------------------- | ---------------------------------------------- |
-| `SensorSource`                 | `sensors/base.py`    | `MockSource`, and `SimSource` in `sim/episode.py` | `RosSource` reading real sensor topics         |
+| `SensorSource`                 | `sensors/base.py`    | `MockSource`, and `SimSource` in `sim/episode.py` | `RosSource` (BUILT): proprioception + force_torque from `/joint_states`, composited with `TSF85Source` + `CameraSource` |
 | `RobotBackend` + `SceneOracle` | `control/backend.py` | `SimWorld` (satisfies both)                       | a `RosBackend`                                 |
 | `ManipulationPolicy`           | `control/policy.py`  | `ScriptedGraspPolicy`                             | teleop / a learned policy                      |
 | `Trainer`                      | `policy/trainer.py`  | `StubTrainer` (a baseline floor)                  | `LeRobotACTTrainer` (real ACT, on the cluster) |
@@ -100,8 +100,8 @@ move_pinch_to/move_pinch_pose) and **`SceneOracle`** (task ground truth the sim 
 robot cannot, can pose, upright check, grasp success, label visibility). `SimWorld` implements both. A
 real `RosBackend` implements only `RobotBackend`, and the "oracle" answers come from real perception
 instead. `GraspBackend` is just the composition of the two that the scripted grasp needs. One of those
-real-perception answers is already built ahead of hardware: `harvest/vision/label_visibility.py` reads
-label-visibility from an overhead RGB frame (numpy only), the real-camera equivalent of the sim's
+real-perception answers is already built ahead of hardware. `harvest/vision/label_visibility.py` reads
+label-visibility from an overhead RGB frame (numpy only). It is the real-camera equivalent of the sim's
 segmentation-based label read, so it drops straight into a `RosBackend`'s `SceneOracle` when the camera
 is up.
 
@@ -129,8 +129,9 @@ Harvest-Recovery/
 │   │   ├── sensors/mock.py         # MockSource: deterministic synthetic source for tests
 │   │   ├── sensors/tsf85.py        # TSF85Source: Robotiq TSF-85 tactile over USB (pressure/dynamic/IMU) + calibration
 │   │   ├── sensors/camera.py       # CameraSource + RealSenseGrabber (D435i) / OpenCVGrabber (overhead RGB-D)
+│   │   ├── sensors/ros_source.py    # RosSource + LiveRosBridge: proprioception + force_torque from /joint_states (lazy rclpy)
 │   │   ├── sensors/vendor/robotiq_tsf85_protocol.py  # vendored Robotiq USB frame parser (BSD-3)
-│   │   ├── recorder/recorder.py    # record_episode: sensor-agnostic sampling loop + timestamp check
+│   │   ├── recorder/recorder.py    # record_episode (sequential) + record_ticks (synchronized live capture)
 │   │   ├── protocol/protocol.py    # EpisodeProtocol FSM for a real collection session (hardware/mock path)
 │   │   ├── control/backend.py      # RobotBackend + SceneOracle + GraspBackend Protocols (the hardware seam)
 │   │   ├── control/policy.py       # ManipulationPolicy Protocol + ScriptedGraspPolicy
@@ -212,10 +213,10 @@ Harvest-Recovery/
   an `OpenCVGrabber` for a plain USB webcam). Each injects its device behind a small seam, so the decode
   is tested with synthetic frames and the real hardware libs (`pyserial`, `pyrealsense2`, `cv2`) stay
   lazy.
-- `recorder/` -- `record_episode`, the sensor-agnostic sampling loop that pulls each modality on a clock
+- `recorder/` -- `record_episode`, the sensor-agnostic sampling loop that pulls each modality on a clock (plus `record_ticks`, the synchronized per-tick, stop-controlled variant for live hardware capture, atomic ticks + drop tolerance)
   and checks timestamp consistency.
 - `protocol/` -- `EpisodeProtocol`, a finite-state machine for a real collection session (the
-  hardware/mock path). The sim generation path does not use it, it uses `sim/episode.py` instead.
+  hardware/mock path). The sim generation path does not use it. It uses `sim/episode.py` instead.
 - `control/` -- the backend-agnostic control layer. `backend.py` (the `RobotBackend` / `SceneOracle` /
   `GraspBackend` Protocols) + `policy.py` (`ManipulationPolicy` Protocol + `ScriptedGraspPolicy`). No
   MuJoCo here, so a policy drives any backend.
@@ -255,9 +256,9 @@ The sim exists to validate the pipeline and to prototype the ACT training loop b
 **smoke test**, not a source of trusted numbers. Three design choices explain most of the sim code, and
 one hard-won lesson explains why the sim ACT result is not evidence.
 
-- **The weld.** MuJoCo's rigid-pad friction cannot hold a can through an in-hand reorient, so once the
-  can is grasped we kinematically attach it to the hand (`Weld` in `reorient.py`), forcing the can to
-  follow the pinch each step. This lets us GENERATE clean reorient demonstrations. It also means
+- **The weld.** MuJoCo's rigid-pad friction cannot hold a can through an in-hand reorient. Once the
+  can is grasped we therefore kinematically attach it to the hand (`Weld` in `reorient.py`), which forces
+  the can to follow the pinch each step. This lets us GENERATE clean reorient demonstrations. It also means
   `grasp_stable` is a simulator-default label with no information in sim (a real tactile/physics signal
   only on hardware), which the dataset card discloses.
 - **Plan-then-execute.** "Present the label up" is a whole family of arm poses, and which member is
@@ -275,13 +276,13 @@ one hard-won lesson explains why the sim ACT result is not evidence.
 
 **Why the sim ACT result is not evidence (the lesson).** ACT trains well and fits the training cans, but
 it does not generalize to held-out cans in sim. Two red/blue audits (see `ACT-EVAL-AUDIT.md`) traced this
-to a structural cause: the scripted demonstration's target action is not a learnable function of what the
+to a structural cause. The scripted demonstration's target action is not a learnable function of what the
 camera sees. The presentation pose comes from that hidden reachability search, which a 96x96 image cannot
 resolve, and a simpler presentation is not reachable. So the sim validates the machinery (it runs end to
 end, ACT trains, the eval is faithful) but cannot demonstrate policy generalization. The trusted ACT
-baseline is the HARDWARE dataset, where demonstrations come from a human teleoperator whose pose choice
-IS driven by what they see, so the demos are learnable by construction. This is why Part 1's headline
-results are hardware, and the sim is a smoke test.
+baseline is the HARDWARE dataset. There the demonstrations come from a human teleoperator whose pose
+choice IS driven by what they see, so the demos are learnable by construction. This is why Part 1's
+headline results are hardware, and the sim is a smoke test.
 
 ## 7. Testing and the dev tools
 
