@@ -95,9 +95,10 @@ class RealSenseSource:
     swap would match blue instead. `start()` / `stop()` are idempotent so two grabbers can share one
     source. Frames are untested until bench-validated against the live D435i (timing + color/depth align)."""
 
-    def __init__(self, width: int = 640, height: int = 480, fps: int = 30, _rs=None):
+    def __init__(self, width: int = 640, height: int = 480, fps: int = 30, _rs=None, align: bool = True):
         self._width, self._height, self._fps = width, height, fps
         self._rs = _rs                         # inject a fake for tests; else lazy pyrealsense2
+        self._do_align = align                 # align depth onto color; the fragile step under USB-2 load
         self._pipeline = None
         self._align = None
         self._color: Optional[np.ndarray] = None
@@ -115,12 +116,15 @@ class RealSenseSource:
         cfg.enable_stream(rs.stream.depth, self._width, self._height, rs.format.z16, self._fps)
         self._pipeline = rs.pipeline()
         self._pipeline.start(cfg)
-        self._align = rs.align(rs.stream.color)
+        # The align processing block corrupts under USB-2 + CPU contention (concurrent tactile serial +
+        # ROS spin), the failure seen on the bench. align=False skips it and stores raw depth in the
+        # depth sensor's own frame; alignment, if ever needed, is applied offline from saved intrinsics.
+        self._align = rs.align(rs.stream.color) if self._do_align else None
 
     def poll(self) -> None:
-        """Grab one aligned frameset, cache color as RGB and depth as uint16."""
+        """Grab one frameset, cache color as RGB and depth as uint16 (depth aligned to color if align)."""
         frames = self._pipeline.wait_for_frames()
-        aligned = self._align.process(frames)
+        aligned = self._align.process(frames) if self._align is not None else frames
         color_bgr = np.asanyarray(aligned.get_color_frame().get_data())
         self._color = np.ascontiguousarray(color_bgr[..., ::-1])    # BGR -> RGB
         self._depth = np.asanyarray(aligned.get_depth_frame().get_data())
@@ -151,15 +155,18 @@ class RealSenseGrabber:
     recording); pass no source for the common single-stream case and it opens its own."""
 
     def __init__(self, stream: str = "color", *, width: int = 640, height: int = 480, fps: int = 30,
-                 source: Optional[RealSenseSource] = None):
+                 source: Optional[RealSenseSource] = None, poll_on_read: bool = True):
         if stream not in ("color", "depth"):
             raise ValueError(f"stream must be 'color' or 'depth', got {stream!r}")
         self._stream = stream
         self._source = source if source is not None else RealSenseSource(width, height, fps)
+        self._poll_on_read = poll_on_read
 
     def read(self) -> np.ndarray:
         self._source.start()                   # idempotent
-        self._source.poll()
+        if self._poll_on_read:
+            self._source.poll()                # else a sibling grabber polled this tick (one device
+        # poll backs both overhead streams from one frameset: half the USB reads, tight color/depth sync)
         return self._source.color() if self._stream == "color" else self._source.depth()
 
     def close(self) -> None:

@@ -243,3 +243,32 @@ def test_realsense_source_start_is_idempotent():
     src.start()                                          # second start is a no-op, must not raise
     src.stop()
     src.stop()                                           # second stop is a no-op too
+
+
+def test_realsense_grabber_poll_on_read_false_does_not_poll():
+    # A follower grabber (poll_on_read=False) serves the cached frameset a sibling already polled,
+    # so ONE device poll per tick backs BOTH overhead streams (half the USB reads, same frameset).
+    fake = _FakeRSSource(_rgb_frame(3), np.full((4, 5), 9, np.uint16))
+    leader = RealSenseGrabber("color", source=fake)                 # polls
+    follower = RealSenseGrabber("depth", source=fake, poll_on_read=False)  # reads cache, no poll
+    leader.read()
+    follower.read()
+    assert fake.polls == 1                                          # only the leader polled
+    np.testing.assert_array_equal(follower.read(), np.full((4, 5), 9, np.uint16))
+    assert fake.polls == 1                                          # follower still never polls
+
+
+def test_realsense_source_align_false_skips_align_block():
+    # The align block is the step that fails under USB-2/CPU contention. align=False must never build
+    # or call it; poll() then serves raw (unaligned) color + depth, which is correct for raw capture.
+    class _BoomAlignRS(_FakeRS):
+        def align(self, to):
+            raise AssertionError("align must not be used when align=False")
+
+    bgr = np.zeros((2, 2, 3), np.uint8)
+    bgr[..., 2] = 150
+    src = RealSenseSource(align=False, _rs=_BoomAlignRS(bgr, np.full((2, 2), 7, np.uint16)))
+    src.start()
+    src.poll()                                          # would raise if align were used
+    assert src.color()[..., 0].mean() == 150            # still BGR->RGB converted
+    assert src.depth()[0, 0] == 7
