@@ -4,6 +4,42 @@ version = "0.0.0"
 description = "HARVEST data-collection framework + recovery-selection layer (RIVeR Lab)"
 requires-python = ">=3.10"
 
+# CORE. What the robot-free suite needs, and nothing more. A bare machine with these
+# four runs all 206 tests. Floors are the versions this was developed against.
+dependencies = [
+    "numpy>=2.5.1",              # everywhere
+    "mujoco>=3.10.0",            # src/harvest/sim/ only, per the fence
+    "rosbags>=0.11.3",           # src/harvest/io/, pure-Python rosbag2 (no ROS2 install needed)
+    "robot_descriptions>=3.0.0", # src/harvest/sim/scene.py, fetches the Gen3 model
+]
+
+# THE GROUPS MIRROR THE SOFTWARE/HARDWARE FENCE. Each one is imported by code that is
+# already guarded, which is why the suite passes on a Mac with none of them installed.
+# Install a group only on the machine that needs it.
+[project.optional-dependencies]
+
+# THE CAPTURE HOST ONLY (Linux, at the bench). Drivers for physical sensors.
+hardware = [
+    "pyserial>=3.5",       # src/harvest/sensors/tsf85.py, TSF-85 tactile over USB serial
+    "pyrealsense2>=2.55",  # src/harvest/sensors/camera.py, RealSense D435i
+    "opencv-python>=4.10",  # cv2, ArUco eye-to-hand calibration + camera frame handling
+]
+
+# THE CLUSTER ONLY. The ACT imitation baseline. Heavy, and never needed to run the suite.
+train = [
+    "torch>=2.4",
+    "lerobot>=0.1",
+]
+
+dev = [
+    "pytest>=9.1.1",
+]
+
+# NOT PIP-INSTALLABLE, DO NOT ADD THEM HERE. `rclpy`, `sensor_msgs`, and `control_msgs`
+# come from ROS2 Humble via apt (`ros-humble-*`) on the capture host, not from PyPI.
+# `src/harvest/sensors/ros_source.py` and the `scripts/hardware/` teleop need them, and
+# they are the reason that code runs only on the bench machine. See HARDWARE.md.
+
 # src-layout: packages `schema`, `harvest`, `recovery` live under src/.
 # `pythonpath = src` makes them importable as top-level packages in tests,
 # so imports are absolute (`from schema...`) and the fence stays grep-checkable.
